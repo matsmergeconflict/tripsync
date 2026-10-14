@@ -1,69 +1,57 @@
-import Image from "next/image";
+import { Suspense } from "react";
+import { CreateTripForm } from "./CreateTripForm";
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-10 px-4 py-10 sm:py-16">
+      <header className="flex items-center gap-2 text-pine-700">
+        <Logo />
+        <span className="text-lg font-semibold tracking-tight">TripSync</span>
+      </header>
+      <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr] lg:items-start">
+        <section className="flex flex-col gap-5">
+          <h1 className="text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+            Wer ist wann da?
+            <br />
+            <span className="text-pine-600">Endlich auf einen Blick.</span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="max-w-lg text-[17px] leading-relaxed text-muted">
+            TripSync organisiert Gruppenreisen mit unterschiedlichen An- und Abreisen – Skiurlaub, Hüttenwochenende, Gruppenfahrt. Alle tragen sich per
+            Link ein, ohne Konto. Du siehst sofort, wie viele Leute an jedem Tag da sind, wer welchen Skipass braucht und was eingekauft werden muss.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+          <ul className="grid gap-3 text-[15px] sm:grid-cols-2">
+            {[
+              ["Zeitachse", "Ein Balken pro Person – An- und Abreise sofort sichtbar."],
+              ["Ohne Konto", "Einladungslink teilen, jeder pflegt seine Daten selbst."],
+              ["Skipässe", "Bedarf pro Tag und Kategorie, automatisch gezählt."],
+              ["Essen & Einkauf", "Portionen aus den Anmeldungen, Einkaufsliste aus den Rezepten."],
+            ].map(([t, d]) => (
+              <li key={t} className="rounded-xl border border-line bg-surface p-4">
+                <div className="font-semibold">{t}</div>
+                <div className="text-sm text-muted">{d}</div>
+              </li>
+            ))}
+          </ul>
+        </section>
+        <section className="rounded-2xl border border-line bg-surface p-5 shadow-sm sm:p-6">
+          <h2 className="mb-1 text-lg font-semibold">Neue Reise anlegen</h2>
+          <p className="mb-5 text-sm text-muted">Du wirst Organisator und bekommst einen persönlichen Zugangslink.</p>
+          <Suspense>
+            <CreateTripForm />
+          </Suspense>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function Logo() {
+  return (
+    <svg viewBox="0 0 32 32" className="size-8" aria-hidden>
+      <rect width="32" height="32" rx="8" fill="currentColor" />
+      <path d="M6 23l6-9 4 5 3-4 7 8z" fill="#fff" />
+      <rect x="7" y="9" width="10" height="2.5" rx="1.25" fill="#a6dcc9" />
+      <rect x="12" y="13" width="13" height="2.5" rx="1.25" fill="#a6dcc9" opacity=".7" />
+    </svg>
   );
 }
