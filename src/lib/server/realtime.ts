@@ -1,6 +1,7 @@
 import "server-only";
 import { EventEmitter } from "node:events";
 import pg from "pg";
+import { databaseUrl } from "../dburl";
 
 /**
  * Live-Aktualisierung: Jede Änderung ruft pg_notify('tripsync', {tripId}) auf.
@@ -21,7 +22,7 @@ function bus() {
 
 async function connectListener(): Promise<void> {
   const b = bus();
-  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  const client = new pg.Client({ connectionString: databaseUrl(true) });
   client.on("notification", (msg) => {
     try {
       const { tripId, kind } = JSON.parse(msg.payload ?? "{}");

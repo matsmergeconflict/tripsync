@@ -1,5 +1,6 @@
 import "server-only";
 import pg from "pg";
+import { databaseUrl } from "../dburl";
 
 // DATE (1082) als "YYYY-MM-DD"-String statt JS-Date (verhindert Zeitzonenfehler)
 pg.types.setTypeParser(1082, (v) => v);
@@ -12,9 +13,9 @@ const g = globalThis as unknown as { __tripsyncPool?: pg.Pool };
 
 export function pool(): pg.Pool {
   if (!g.__tripsyncPool) {
-    const connectionString = process.env.DATABASE_URL;
+    const connectionString = databaseUrl();
     if (!connectionString) throw new Error("DATABASE_URL ist nicht gesetzt");
-    g.__tripsyncPool = new pg.Pool({ connectionString, max: 10 });
+    g.__tripsyncPool = new pg.Pool({ connectionString, max: process.env.VERCEL ? 3 : 10 });
   }
   return g.__tripsyncPool;
 }

@@ -2,14 +2,22 @@
  * Führt SQL-Migrationen aus db/migrations in alphabetischer Reihenfolge aus.
  * Aufruf: DATABASE_URL=... npx tsx scripts/migrate.ts [--reset]
  * --reset löscht alle Tabellen (nur für Test-/Entwicklungsdatenbanken!).
+ * --if-configured: ohne Datenbank-URL still überspringen (für Builds ohne DB).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Client } from "pg";
+import { databaseUrl } from "../src/lib/dburl";
 
 async function main() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL fehlt");
+  const url = databaseUrl(true);
+  if (!url) {
+    if (process.argv.includes("--if-configured")) {
+      console.log("Keine Datenbank konfiguriert – Migration übersprungen");
+      return;
+    }
+    throw new Error("DATABASE_URL fehlt");
+  }
   const reset = process.argv.includes("--reset");
   const client = new Client({ connectionString: url });
   await client.connect();
