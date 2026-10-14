@@ -35,12 +35,11 @@ const dayList = z
   .optional()
   .transform((v) => [...new Set(v ?? [])].sort());
 
-/** Felder, die ein Teilnehmer selbst setzen darf. */
-export const participantSelfSchema = z.object({
+/** Angaben zu einer Person (ohne gruppenweite Felder wie Kontakt). */
+export const personSchema = z.object({
+  id: z.string().uuid().optional(),
   first_name: z.string().trim().min(1, "Vorname fehlt").max(60),
-  last_name: z.string().trim().max(60).optional().default(""),
-  contact: optText(200),
-  comment: optText(2000),
+  last_name: z.string().trim().min(1, "Nachname fehlt").max(60),
   arrival_date: optDate,
   arrival_time: optTime,
   departure_date: optDate,
@@ -58,7 +57,34 @@ export const participantSelfSchema = z.object({
   allergies: optText(1000),
   status: z.enum(["active", "withdrawn"]).optional(),
 });
+export type PersonInput = z.infer<typeof personSchema>;
 
+const groupFields = {
+  contact: optText(200),
+  comment: optText(2000),
+};
+
+/**
+ * Anmeldung über den Einladungslink: eine oder mehrere Personen (z. B. Familie).
+ * Aus Kompatibilitätsgründen wird auch eine einzelne Person ohne `persons` akzeptiert.
+ */
+export const registrationSchema = z.preprocess(
+  (raw) => {
+    if (raw && typeof raw === "object" && !Array.isArray(raw) && !("persons" in raw)) {
+      const { contact, comment, ...person } = raw as Record<string, unknown>;
+      return { contact, comment, persons: [person] };
+    }
+    return raw;
+  },
+  z.object({
+    ...groupFields,
+    persons: z.array(personSchema).min(1, "Mindestens eine Person").max(12, "Maximal 12 Personen pro Anmeldung"),
+  })
+);
+export type RegistrationInput = z.infer<typeof registrationSchema>;
+
+/** Kompatibler Alias: einzelne Person inkl. Gruppenfeldern. */
+export const participantSelfSchema = personSchema.extend(groupFields);
 export type ParticipantSelfInput = z.infer<typeof participantSelfSchema>;
 
 /** Organisatoren dürfen zusätzlich interne Notizen pflegen. */
@@ -69,7 +95,7 @@ export type ParticipantOrgInput = z.infer<typeof participantOrgSchema>;
 
 /** Prüft die Daten gegen den Reisezeitraum. Gibt Fehlermeldungen je Feld zurück. */
 export function validateAgainstTrip(
-  p: Pick<ParticipantSelfInput, "arrival_date" | "departure_date" | "ski_days" | "meal_days">,
+  p: Pick<PersonInput, "arrival_date" | "departure_date" | "ski_days" | "meal_days">,
   trip: { start_date: string; end_date: string }
 ): Record<string, string> {
   const errors: Record<string, string> = {};
@@ -102,6 +128,7 @@ export const tripCreateSchema = z
 
 export const tripUpdateSchema = z.object({
   version: z.number().int(),
+  require_approval: z.boolean().optional(),
   name: z.string().trim().min(1).max(120).optional(),
   location: patchText(120),
   start_date: isoDate.optional(),

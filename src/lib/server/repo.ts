@@ -10,7 +10,7 @@ import type {
 } from "../types";
 import type { ParticipantOrgInput } from "../validation";
 
-export const TRIP_COLUMNS = `id, name, location, start_date, end_date, public_enabled, invite_enabled, ski_enabled,
+export const TRIP_COLUMNS = `id, name, location, start_date, end_date, public_enabled, invite_enabled, require_approval, ski_enabled,
   ski_categories, ski_notes, version, created_at, updated_at`;
 
 export type TripRow = Trip & { invite_enabled: boolean; invite_code?: string; public_code?: string };
@@ -24,7 +24,8 @@ export async function getTrip(db: Db, tripId: string, withCodes = false): Promis
 }
 
 const PARTICIPANT_SELECT = `
-  SELECT p.id, p.trip_id, p.first_name, p.last_name, p.contact, p.comment, p.org_note, p.status, p.version,
+  SELECT p.id, p.trip_id, p.registration_id, p.position, p.approval, p.first_name, p.last_name,
+         r.contact, r.comment, p.org_note, p.status, p.version,
          p.created_at, p.updated_at,
          s.arrival_date, to_char(s.arrival_time, 'HH24:MI') AS arrival_time,
          s.departure_date, to_char(s.departure_time, 'HH24:MI') AS departure_time,
@@ -35,6 +36,7 @@ const PARTICIPANT_SELECT = `
          COALESCE(m.meal_mode, 'unknown') AS meal_mode, m.diet, m.food_wishes, m.allergies,
          COALESCE((SELECT array_agg(d.day::text ORDER BY d.day) FROM meal_days d WHERE d.participant_id = p.id), '{}') AS meal_days
     FROM participants p
+    JOIN registrations r ON r.id = p.registration_id
     LEFT JOIN stays s ON s.participant_id = p.id
     LEFT JOIN ski_requests k ON k.participant_id = p.id
     LEFT JOIN meal_prefs m ON m.participant_id = p.id`;
@@ -44,37 +46,41 @@ export async function listParticipants(db: Db, tripId: string): Promise<Particip
   return rows;
 }
 
+export async function listRegistrationParticipants(db: Db, registrationId: string): Promise<Participant[]> {
+  const { rows } = await db.query(`${PARTICIPANT_SELECT} WHERE p.registration_id = $1 ORDER BY p.position, p.created_at`, [registrationId]);
+  return rows;
+}
+
 export async function getParticipant(db: Db, id: string): Promise<Participant | null> {
   const { rows } = await db.query(`${PARTICIPANT_SELECT} WHERE p.id = $1`, [id]);
   return rows[0] ?? null;
 }
 
-export async function getParticipantByTokenHash(db: Db, hash: string): Promise<Participant | null> {
-  const { rows } = await db.query(`${PARTICIPANT_SELECT} WHERE p.edit_token_hash = $1`, [hash]);
+export interface Registration {
+  id: string;
+  trip_id: string;
+  contact: string | null;
+  comment: string | null;
+  version: number;
+}
+
+export async function getRegistrationByTokenHash(db: Db, hash: string): Promise<Registration | null> {
+  const { rows } = await db.query(`SELECT id, trip_id, contact, comment, version FROM registrations WHERE edit_token_hash = $1`, [hash]);
   return rows[0] ?? null;
 }
 
-/** Anzeigename für öffentliche Listen: Vorname + Initiale des Nachnamens, bei Dubletten voller Nachname. */
-export function displayNames(ps: Pick<Participant, "id" | "first_name" | "last_name">[]): Map<string, string> {
-  const out = new Map<string, string>();
-  const short = (p: (typeof ps)[number]) => (p.last_name ? `${p.first_name} ${p.last_name.charAt(0)}.` : p.first_name);
-  const counts = new Map<string, number>();
-  for (const p of ps) counts.set(short(p), (counts.get(short(p)) ?? 0) + 1);
-  for (const p of ps) {
-    const s = short(p);
-    out.set(p.id, (counts.get(s) ?? 0) > 1 && p.last_name ? `${p.first_name} ${p.last_name}` : s);
-  }
-  return out;
+/** Anzeigename in der Teilnehmerübersicht: voller Name (Vorgabe des Auftraggebers). */
+export function displayName(p: Pick<Participant, "first_name" | "last_name">): string {
+  return `${p.first_name} ${p.last_name}`.trim();
 }
 
-/** Reduziert Teilnehmer auf öffentlich erlaubte Felder (Allowlist, nicht Blocklist). */
+/** Reduziert Teilnehmer auf öffentlich erlaubte Felder (Allowlist, nicht Blocklist). Nur bestätigte, aktive Personen. */
 export function toPublic(ps: Participant[]): PublicParticipant[] {
-  const active = ps.filter((p) => p.status === "active");
-  const names = displayNames(active);
+  const active = ps.filter((p) => p.status === "active" && p.approval === "approved");
   return active.map((p) => {
     const pub: PublicParticipant = {
       id: p.id,
-      display_name: names.get(p.id)!,
+      display_name: displayName(p),
       arrival_date: p.arrival_date,
       departure_date: p.departure_date,
       stay_status: p.stay_status,

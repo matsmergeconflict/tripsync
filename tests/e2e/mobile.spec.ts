@@ -38,18 +38,19 @@ test("Zeitachse und Anmeldung auf dem Smartphone", async ({ page, request }) => 
   // Anmeldeformular mobil bedienbar
   await page.goto(`/join/${t.invite}`);
   await page.getByLabel("Vorname").fill("Handy");
-  await page.getByRole("button", { name: "Weiter" }).click();
+  await page.getByLabel("Nachname").fill("Nutzer");
+  await page.getByRole("button", { name: "Weiter", exact: true }).click();
   const range = page.getByRole("group", { name: "Anreise und Abreise wählen" });
   const day = range.locator('[data-day="2027-01-18"]');
   const box = await day.boundingBox();
   expect(box!.height).toBeGreaterThanOrEqual(40); // große Touch-Ziele
   await day.click();
   await range.locator('[data-day="2027-01-19"]').click();
-  await page.getByRole("button", { name: "Weiter" }).click();
+  await page.getByRole("button", { name: "Weiter", exact: true }).click();
   await page.getByRole("radiogroup", { name: "Skipass erforderlich" }).getByText("Nein").click();
-  await page.getByRole("button", { name: "Weiter" }).click();
+  await page.getByRole("button", { name: "Weiter", exact: true }).click();
   await page.getByLabel("Ernährungsweise").selectOption("vegan");
-  await page.getByRole("button", { name: "Weiter" }).click();
+  await page.getByRole("button", { name: "Weiter", exact: true }).click();
   await page.getByRole("button", { name: "Anmeldung absenden" }).click();
   await expect(page.getByTestId("join-done")).toBeVisible();
 });

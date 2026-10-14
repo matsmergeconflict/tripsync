@@ -2,6 +2,7 @@ import type { ISODate } from "./dates";
 
 export type StayStatus = "confirmed" | "tentative";
 export type ParticipantStatus = "active" | "withdrawn";
+export type Approval = "pending" | "approved" | "rejected";
 export type SkiNeed = "yes" | "no" | "unknown";
 export type MealMode = "all_present" | "custom" | "none" | "unknown";
 export type Diet = "omnivore" | "vegetarian" | "vegan" | "pescetarian" | "other";
@@ -38,6 +39,7 @@ export interface Trip {
   start_date: ISODate;
   end_date: ISODate;
   public_enabled: boolean;
+  require_approval: boolean;
   ski_enabled: boolean;
   ski_categories: SkiCategory[];
   ski_notes: string | null;
@@ -50,10 +52,13 @@ export interface Trip {
 export interface Participant {
   id: string;
   trip_id: string;
+  registration_id: string;
+  position: number;
+  approval: Approval;
   first_name: string;
   last_name: string;
-  contact: string | null;
-  comment: string | null; // privat: an Organisatoren
+  contact: string | null; // gilt für die ganze Anmeldung (Gruppe)
+  comment: string | null; // privat: an Organisatoren, gilt für die ganze Anmeldung
   org_note: string | null; // intern: nur Organisatoren
   arrival_date: ISODate | null;
   arrival_time: string | null;
@@ -95,6 +100,7 @@ export type StatParticipant = Pick<
   | "stay_status"
   | "status"
 > &
+  Partial<Pick<Participant, "approval">> &
   Partial<Pick<Participant, "ski_need" | "ski_days" | "ski_category" | "meal_mode" | "meal_days" | "diet">>;
 
 export interface Meal {

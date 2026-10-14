@@ -4,8 +4,9 @@ import type { Diet, StatParticipant, Participant } from "./types";
 /** Tagesrolle einer Person im Gantt / in der Statistik. */
 export type DayRole = "arrival" | "departure" | "arrival_departure" | "stay" | null;
 
-export function isActive(p: Pick<StatParticipant, "status">): boolean {
-  return p.status === "active";
+/** Zählt mit: nicht zurückgezogen und (falls Bestätigung nötig) bestätigt. */
+export function isActive(p: Pick<StatParticipant, "status" | "approval">): boolean {
+  return p.status === "active" && (p.approval ?? "approved") === "approved";
 }
 
 /** Hat die Person vollständige, plausible Aufenthaltsdaten? */

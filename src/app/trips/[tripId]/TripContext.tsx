@@ -23,7 +23,10 @@ interface Ctx {
   tripId: string;
   data: TripPayload;
   days: string[];
+  /** zählen mit: aktiv und bestätigt */
   active: Participant[];
+  /** aktiv, aber noch nicht bestätigt */
+  pending: Participant[];
   stats: DayStats[];
   issues: Map<string, IssueCode[]>;
   reload: () => Promise<void>;
@@ -83,12 +86,14 @@ export function TripProvider({
 
   const value = useMemo<Ctx | null>(() => {
     if (!data) return null;
-    const active = data.participants.filter((p) => p.status === "active");
+    const active = data.participants.filter((p) => p.status === "active" && p.approval === "approved");
+    const pending = data.participants.filter((p) => p.status === "active" && p.approval === "pending");
     return {
       tripId,
       data,
       days: eachDay(data.trip.start_date, data.trip.end_date),
       active,
+      pending,
       stats: computeDayStats(data.participants, data.trip.start_date, data.trip.end_date),
       issues: new Map(data.participants.map((p) => [p.id, findIssues(p, data.trip)])),
       reload,

@@ -81,6 +81,13 @@ function Sharing() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-3">
           <Toggle checked={t.invite_enabled} onChange={(v) => patch({ invite_enabled: v })} label="Anmeldungen offen" description="Über den Einladungslink können sich neue Personen eintragen." />
+          <Toggle
+            testId="approval-toggle"
+            checked={t.require_approval}
+            onChange={(v) => patch({ require_approval: v })}
+            label="Anmeldungen müssen bestätigt werden"
+            description="Neue Anmeldungen zählen erst mit, wenn ein Organisator sie in der Übersicht bestätigt hat. Ausgeschaltet zählt jede Anmeldung sofort."
+          />
           {t.invite_enabled && <CopyLink url={data.links.invite} label="Einladungslink" />}
           <div>
             <Button size="sm" variant="ghost" onClick={() => regen("invite")}>

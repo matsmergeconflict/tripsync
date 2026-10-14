@@ -8,6 +8,7 @@ import { api, ApiError } from "@/lib/client/api";
 import { formatLong, formatShort } from "@/lib/dates";
 import { ISSUE_LABELS, ISSUE_SEVERITY } from "@/lib/stats";
 import { DIET_LABELS, type Participant } from "@/lib/types";
+import { approvalMessage, useDecide, whatsappLink } from "./Approvals";
 
 export function personName(p: Pick<Participant, "first_name" | "last_name">) {
   return `${p.first_name} ${p.last_name}`.trim();
@@ -154,8 +155,62 @@ export function AuditList({ entityId }: { entityId?: string }) {
   );
 }
 
+function ApprovalBox({ p, mates, decide }: { p: Participant; mates: Participant[]; decide: ReturnType<typeof useDecide> }) {
+  const { data } = useTrip();
+  const others = mates.filter((m) => m.id !== p.id);
+  const pendingIds = mates.filter((m) => m.approval === "pending" && m.status === "active").map((m) => m.id);
+  const [sent, setSent] = useState<"approved" | "rejected" | null>(null);
+  const publicUrl = data.trip.public_enabled ? data.links.public : null;
+  const names = mates.map((m) => m.first_name);
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-line p-3" data-testid="approval-box">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">Anmeldung:</span>
+        {p.approval === "approved" ? <Badge tone="ok">✓ bestätigt</Badge> : p.approval === "rejected" ? <Badge tone="bad">abgelehnt</Badge> : <Badge tone="info">wartet auf Bestätigung</Badge>}
+      </div>
+      {others.length > 0 && (
+        <p className="text-xs text-muted">
+          Gemeinsam angemeldet mit: {others.map((o) => personName(o)).join(", ")}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {p.approval !== "approved" && (
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={async () => {
+              const ids = p.approval === "pending" && pendingIds.length > 1 ? pendingIds : [p.id];
+              if (await decide(ids, "approved")) setSent("approved");
+            }}
+          >
+            {p.approval === "pending" && pendingIds.length > 1 ? `Alle ${pendingIds.length} bestätigen` : "Bestätigen"}
+          </Button>
+        )}
+        {p.approval !== "rejected" && (
+          <Button
+            size="sm"
+            variant="danger"
+            onClick={async () => {
+              if (!confirm(`${personName(p)} ablehnen?`)) return;
+              if (await decide([p.id], "rejected")) setSent("rejected");
+            }}
+          >
+            Ablehnen
+          </Button>
+        )}
+      </div>
+      {sent && (
+        <a href={whatsappLink(approvalMessage(names, data.trip.name, sent, publicUrl), p.contact)} target="_blank" rel="noreferrer" className="text-sm font-medium text-pine-700 underline">
+          Per WhatsApp Bescheid geben →
+        </a>
+      )}
+    </div>
+  );
+}
+
 export function ParticipantSheet({ id, onClose }: { id: string | null; onClose: () => void }) {
   const { data, tripId, issues, reload, toast } = useTrip();
+  const decide = useDecide();
   const p = data.participants.find((x) => x.id === id) ?? null;
   const [mode, setMode] = useState<"view" | "edit" | "history">("view");
   const [link, setLink] = useState<string | null>(null);
@@ -194,6 +249,7 @@ export function ParticipantSheet({ id, onClose }: { id: string | null; onClose: 
       {mode === "view" && (
         <div className="flex flex-col gap-4 text-sm" data-testid="participant-details">
           {p.status === "withdrawn" && <Notice tone="warn">Teilnahme zurückgezogen – zählt in keiner Übersicht.</Notice>}
+          <ApprovalBox p={p} mates={data.participants.filter((x) => x.registration_id === p.registration_id)} decide={decide} />
           {pIssues.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {pIssues.map((i) => (

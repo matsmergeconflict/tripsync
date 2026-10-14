@@ -28,7 +28,7 @@ function Icon({ d }: { d: string }) {
 
 function NavLinks({ base, onNavigate }: { base: string; onNavigate?: () => void }) {
   const pathname = usePathname();
-  const { issues, active, data } = useTrip();
+  const { issues, active, data, pending } = useTrip();
   const openIssues = active.filter((p) => !isComplete(issues.get(p.id) ?? [])).length;
   return (
     <nav aria-label="Hauptnavigation" className="flex flex-col gap-0.5">
@@ -48,6 +48,11 @@ function NavLinks({ base, onNavigate }: { base: string; onNavigate?: () => void 
           >
             <Icon d={n.icon} />
             <span className="flex-1">{n.label}</span>
+            {n.href === "" && pending.length > 0 && (
+              <span className="rounded-full bg-snow px-2 text-xs font-semibold text-white" title="Anmeldungen warten auf Bestätigung" data-testid="pending-badge">
+                {pending.length}
+              </span>
+            )}
             {n.href === "/participants" && openIssues > 0 && (
               <span className="rounded-full bg-amber-soft px-2 text-xs font-semibold text-amber-ink" title="Anmeldungen mit offenen Angaben">
                 {openIssues}

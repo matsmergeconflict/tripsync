@@ -134,10 +134,11 @@ test.describe("Anmeldung ohne Konto und persönlicher Link", () => {
     const b = await join(anon, t, { ...basePerson, first_name: "Ben", allergies: null });
     // /api/me adressiert ausschließlich die zum Token gehörende Anmeldung – IDs im Body werden ignoriert
     const meA = (await (await anon.get("/api/me", { headers: { "x-edit-token": a.token } })).json()).participant;
-    await anon.patch("/api/me", { headers: { "x-edit-token": a.token }, data: { ...basePerson, id: b.id, first_name: "Anna2", version: meA.version } });
+    const hijack = await anon.patch("/api/me", { headers: { "x-edit-token": a.token }, data: { ...basePerson, id: b.id, first_name: "Anna2", version: meA.version } });
+    expect(hijack.status()).toBe(403);
     const data = await getTrip(request, t);
     expect(data.participants.find((x: { id: string }) => x.id === b.id).first_name).toBe("Ben");
-    expect(data.participants.find((x: { id: string }) => x.id === a.id).first_name).toBe("Anna2");
+    expect(data.participants.find((x: { id: string }) => x.id === a.id).first_name).toBe("Anna");
     // Organisator-Endpunkte sind mit Teilnehmer-Token nicht erreichbar
     const viaOrg = await anon.patch(`/api/trips/${t.tripId}/participants/${b.id}`, {
       headers: { "x-edit-token": a.token, "x-organizer-token": a.token },
@@ -180,7 +181,7 @@ test.describe("Anmeldung ohne Konto und persönlicher Link", () => {
     expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, arrival_date: "2027-01-16", departure_date: "2027-01-16", ski_days: [] } })).status()).toBe(201);
     expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, arrival_date: "2027-01-23", departure_date: "2027-01-23", ski_days: [] } })).status()).toBe(201);
     // fehlende Daten sind erlaubt (werden als offen markiert, nicht erfunden)
-    expect((await anon.post(`/api/join/${t.invite}`, { data: { first_name: "Offen" } })).status()).toBe(201);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { first_name: "Offen", last_name: "Daten" } })).status()).toBe(201);
     expect((await anon.post(`/api/join/${t.invite}`, { data: { first_name: "" } })).status()).toBe(400);
   });
 
@@ -224,6 +225,106 @@ test.describe("Anmeldung ohne Konto und persönlicher Link", () => {
   });
 });
 
+test.describe("Bestätigung durch Organisatoren", () => {
+  test("Neue Anmeldungen zählen erst nach Bestätigung, Ablehnung blendet aus", async ({ request }) => {
+    const t = await createTrip(request, "Mit Bestätigung", { requireApproval: true });
+    const a = await join(anon, t, basePerson);
+    const res0 = await anon.get("/api/me", { headers: { "x-edit-token": a.token } });
+    expect((await res0.json()).participants[0].approval).toBe("pending");
+    const days = async () => (await (await request.get(`/api/trips/${t.tripId}/export?type=days`, { headers: org(t) })).text()).split("\r\n").find((l) => l.startsWith("2027-01-17"));
+    expect(await days()).toMatch(/^2027-01-17;0;/);
+    // öffentliche Übersicht zeigt unbestätigte Personen nicht
+    const { trip } = await getTrip(request, t);
+    await anon.patch(`/api/trips/${t.tripId}`, { headers: org(t), data: { version: trip.version, public_enabled: true } });
+    expect((await (await anon.get(`/api/public/${t.publicCode}`)).json()).participants).toHaveLength(0);
+    // Teilnehmer kann sich nicht selbst bestätigen
+    expect((await anon.post(`/api/trips/${t.tripId}/approvals`, { data: { participant_ids: [a.id], decision: "approved" } })).status()).toBe(401);
+    // Organisator bestätigt
+    const ok = await anon.post(`/api/trips/${t.tripId}/approvals`, { headers: org(t), data: { participant_ids: [a.id], decision: "approved" } });
+    expect((await ok.json()).changed).toBe(1);
+    expect(await days()).toMatch(/^2027-01-17;1;/);
+    expect((await (await anon.get(`/api/public/${t.publicCode}`)).json()).participants).toHaveLength(1);
+    // Bestätigung bleibt beim Bearbeiten erhalten
+    const me = await (await anon.get("/api/me", { headers: { "x-edit-token": a.token } })).json();
+    await anon.patch("/api/me", { headers: { "x-edit-token": a.token }, data: { ...basePerson, departure_date: "2027-01-21", version: me.registration.version } });
+    expect((await (await anon.get("/api/me", { headers: { "x-edit-token": a.token } })).json()).participants[0].approval).toBe("approved");
+    // Ablehnen
+    await anon.post(`/api/trips/${t.tripId}/approvals`, { headers: org(t), data: { participant_ids: [a.id], decision: "rejected" } });
+    expect(await days()).toMatch(/^2027-01-17;0;/);
+    // Fremde Reise: IDs werden ignoriert
+    const other = await createTrip(request, "Andere", { requireApproval: true });
+    const res = await anon.post(`/api/trips/${other.tripId}/approvals`, { headers: org(other), data: { participant_ids: [a.id], decision: "approved" } });
+    expect((await res.json()).changed).toBe(0);
+  });
+
+  test("Vom Organisator angelegte Personen sind sofort bestätigt", async ({ request }) => {
+    const t = await createTrip(request, "Org", { requireApproval: true });
+    const r = await anon.post(`/api/trips/${t.tripId}/participants`, { headers: org(t), data: { ...basePerson } });
+    expect(r.status()).toBe(201);
+    const p = (await getTrip(request, t)).participants[0];
+    expect(p.approval).toBe("approved");
+  });
+});
+
+test.describe("Familien-/Gruppenanmeldung", () => {
+  test("Mehrere Personen über einen Link, alle zählen, gemeinsamer Bearbeitungslink", async ({ request }) => {
+    const t = await createTrip(request, "Familie");
+    const shared = { arrival_date: "2027-01-16", departure_date: "2027-01-20", ski_need: "yes", ski_days: ["2027-01-17", "2027-01-18"], meal_mode: "all_present" };
+    const res = await anon.post(`/api/join/${t.invite}`, {
+      data: {
+        contact: "+49 170 1234567",
+        comment: "Familie Berger",
+        persons: [
+          { ...shared, first_name: "Anna", last_name: "Berger", ski_category: "adult", diet: "vegetarian" },
+          { ...shared, first_name: "Ben", last_name: "Berger", ski_category: "child", diet: "omnivore" },
+          { ...shared, first_name: "Clara", last_name: "Berger", ski_need: "no", ski_days: [], diet: "omnivore", departure_date: "2027-01-18" },
+        ],
+      },
+    });
+    expect(res.status()).toBe(201);
+    const body = await res.json();
+    expect(body.ids).toHaveLength(3);
+    const token = body.edit_url.split("/edit/")[1];
+
+    const rows = (await (await request.get(`/api/trips/${t.tripId}/export?type=days`, { headers: org(t) })).text()).split("\r\n");
+    expect(rows.find((l) => l.startsWith("2027-01-17"))).toMatch(/^2027-01-17;3;0;0;0;3;2;3;0$/);
+    expect(rows.find((l) => l.startsWith("2027-01-19"))).toMatch(/^2027-01-19;2;/);
+
+    // Gemeinsamer Link: alle drei sichtbar, Kontakt gilt für alle
+    const me = await (await anon.get("/api/me", { headers: { "x-edit-token": token } })).json();
+    expect(me.participants.map((p: { first_name: string }) => p.first_name)).toEqual(["Anna", "Ben", "Clara"]);
+    expect(me.registration.contact).toBe("+49 170 1234567");
+    const all = (await getTrip(request, t)).participants;
+    expect(new Set(all.map((p: { registration_id: string }) => p.registration_id)).size).toBe(1);
+
+    // Bearbeiten: Ben entfernen, David ergänzen, Clara zurückziehen
+    const [anna, , clara] = me.participants;
+    const patch = await anon.patch("/api/me", {
+      headers: { "x-edit-token": token },
+      data: {
+        version: me.registration.version,
+        contact: "+49 170 1234567",
+        persons: [
+          { ...shared, id: anna.id, first_name: "Anna", last_name: "Berger", ski_category: "adult" },
+          { ...shared, id: clara.id, first_name: "Clara", last_name: "Berger", status: "withdrawn", ski_need: "no", ski_days: [] },
+          { ...shared, first_name: "David", last_name: "Berger", ski_category: "adult" },
+        ],
+      },
+    });
+    expect(patch.status()).toBe(200);
+    const after = (await patch.json()).participants;
+    expect(after.map((p: { first_name: string; status: string }) => `${p.first_name}:${p.status}`)).toEqual(["Anna:active", "Clara:withdrawn", "David:active"]);
+    expect((await getTrip(request, t)).participants).toHaveLength(3);
+  });
+
+  test("Nachname ist Pflicht, maximal 12 Personen", async ({ request }) => {
+    const t = await createTrip(request);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { first_name: "Ohne" } })).status()).toBe(400);
+    const many = Array.from({ length: 13 }, (_, i) => ({ first_name: `P${i}`, last_name: "X" }));
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { persons: many } })).status()).toBe(400);
+  });
+});
+
 test.describe("Öffentliche Übersicht", () => {
   test("nur bei Freigabe und nur mit unkritischen Feldern (AK 5)", async ({ request }) => {
     const t = await createTrip(request);
@@ -243,7 +344,7 @@ test.describe("Öffentliche Übersicht", () => {
     expect(body.participants).toHaveLength(1);
     const p = body.participants[0];
     expect(Object.keys(p).sort()).toEqual(["arrival_date", "departure_date", "display_name", "id", "stay_status"].sort());
-    expect(p.display_name).toBe("Anna B.");
+    expect(p.display_name).toBe("Anna Berger");
     const raw = JSON.stringify(body);
     for (const secret of ["anna@example.com", "Haselnüsse", "Komme mit dem Zug", "Viel Käse", a.token, "invite", t.invite])
       expect(raw).not.toContain(secret);
@@ -266,10 +367,10 @@ test.describe("Öffentliche Übersicht", () => {
 test.describe("Berechnungen und Exporte", () => {
   test("Tagesstatistik: Anwesende, Anreisen, Abreisen, Skipässe (AK 7)", async ({ request }) => {
     const t = await createTrip(request);
-    await join(anon, t, { first_name: "Anna", arrival_date: "2027-01-16", departure_date: "2027-01-20", ski_need: "yes", ski_days: ["2027-01-17"], ski_category: "adult", meal_mode: "all_present", diet: "omnivore" });
-    await join(anon, t, { first_name: "Max", arrival_date: "2027-01-17", departure_date: "2027-01-23", ski_need: "no", meal_mode: "none" });
-    await join(anon, t, { first_name: "Lisa", arrival_date: "2027-01-16", departure_date: "2027-01-17", ski_need: "unknown", meal_mode: "unknown" });
-    await join(anon, t, { first_name: "Tom", arrival_date: "2027-01-18", departure_date: "2027-01-21", stay_status: "tentative", ski_need: "yes", ski_days: ["2027-01-17", "2027-01-19"], meal_mode: "custom", meal_days: ["2027-01-19"] });
+    await join(anon, t, { first_name: "Anna", last_name: "T", arrival_date: "2027-01-16", departure_date: "2027-01-20", ski_need: "yes", ski_days: ["2027-01-17"], ski_category: "adult", meal_mode: "all_present", diet: "omnivore" });
+    await join(anon, t, { first_name: "Max", last_name: "T", arrival_date: "2027-01-17", departure_date: "2027-01-23", ski_need: "no", meal_mode: "none" });
+    await join(anon, t, { first_name: "Lisa", last_name: "T", arrival_date: "2027-01-16", departure_date: "2027-01-17", ski_need: "unknown", meal_mode: "unknown" });
+    await join(anon, t, { first_name: "Tom", last_name: "T", arrival_date: "2027-01-18", departure_date: "2027-01-21", stay_status: "tentative", ski_need: "yes", ski_days: ["2027-01-17", "2027-01-19"], meal_mode: "custom", meal_days: ["2027-01-19"] });
     const csv = await (await request.get(`/api/trips/${t.tripId}/export?type=days`, { headers: org(t) })).text();
     const rows = Object.fromEntries(
       csv
@@ -305,14 +406,14 @@ test.describe("Berechnungen und Exporte", () => {
 
   test("CSV entschärft Formel-Injektion", async ({ request }) => {
     const t = await createTrip(request);
-    await join(anon, t, { first_name: "=HYPERLINK(\"x\")" });
+    await join(anon, t, { first_name: "=HYPERLINK(\"x\")", last_name: "Test" });
     const csv = await (await request.get(`/api/trips/${t.tripId}/export?type=participants`, { headers: org(t) })).text();
     expect(csv).toContain("'=HYPERLINK");
   });
 
   test("Einkaufsliste: Portionen, Skalierung, Einheiten und bestätigte Zusammenführung", async ({ request }) => {
     const t = await createTrip(request);
-    for (const n of ["A", "B", "C", "D", "E", "F"]) await join(anon, t, { first_name: n, arrival_date: "2027-01-16", departure_date: "2027-01-18", meal_mode: "all_present", diet: "omnivore" });
+    for (const n of ["A", "B", "C", "D", "E", "F"]) await join(anon, t, { first_name: n, last_name: "T", arrival_date: "2027-01-16", departure_date: "2027-01-18", meal_mode: "all_present", diet: "omnivore" });
     const h = { headers: org(t) };
     const r1 = await (await request.post(`/api/trips/${t.tripId}/recipes`, { ...h, data: { name: "A", base_servings: 4, ingredients: [{ name: "Kartoffeln", quantity: 2, unit: "kg" }, { name: "Milch", quantity: 500, unit: "ml" }] } })).json();
     const r2 = await (await request.post(`/api/trips/${t.tripId}/recipes`, { ...h, data: { name: "B", base_servings: 3, ingredients: [{ name: "festkochende Kartoffeln", quantity: 750, unit: "g" }, { name: "Milch", quantity: 1, unit: "l" }, { name: "Eier", quantity: 3, unit: "" }] } })).json();

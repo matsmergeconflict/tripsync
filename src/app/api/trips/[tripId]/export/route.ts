@@ -24,7 +24,12 @@ export const GET = handle(async (req: NextRequest, ctx: RouteContext<"/api/trips
   const trip = await getTrip(db, tripId);
   if (!trip) throw new HttpError(404, "Reise nicht gefunden");
   const participants = await listParticipants(db, tripId);
-  const active = participants.filter((p) => p.status === "active");
+  const active = participants.filter((p) => p.status === "active" && p.approval === "approved");
+  const statusLabel = (p: (typeof participants)[number]) =>
+    p.status === "withdrawn" ? "zurückgezogen" : p.approval === "pending" ? "wartet auf Bestätigung" : p.approval === "rejected" ? "abgelehnt" : "angemeldet";
+  // Gruppen (gemeinsame Anmeldung) als Personenliste
+  const groupNames = new Map<string, string[]>();
+  for (const p of participants) groupNames.set(p.registration_id, [...(groupNames.get(p.registration_id) ?? []), `${p.first_name} ${p.last_name}`.trim()]);
   const catName = (id: string | null) =>
     id === null || id === NO_CATEGORY ? "ohne Kategorie" : (trip.ski_categories as SkiCategory[]).find((c) => c.id === id)?.name ?? id;
   let csv: string;
@@ -33,11 +38,12 @@ export const GET = handle(async (req: NextRequest, ctx: RouteContext<"/api/trips
   switch (type) {
     case "participants": {
       csv = toCsv(
-        ["Vorname", "Nachname", "Status", "Anreise", "Ankunftszeit", "Abreise", "Abfahrtszeit", "Angaben", "Skipass", "Skitage", "Passkategorie", "Essen", "Ernährung", "Kontakt", "Offene Punkte"],
+        ["Vorname", "Nachname", "Status", "Angemeldet zusammen mit", "Anreise", "Ankunftszeit", "Abreise", "Abfahrtszeit", "Angaben", "Skipass", "Skitage", "Passkategorie", "Essen", "Ernährung", "Kontakt", "Offene Punkte"],
         participants.map((p) => [
           p.first_name,
           p.last_name,
-          p.status === "active" ? "angemeldet" : "zurückgezogen",
+          statusLabel(p),
+          (groupNames.get(p.registration_id) ?? []).filter((n) => n !== `${p.first_name} ${p.last_name}`.trim()),
           p.arrival_date,
           p.arrival_time,
           p.departure_date,

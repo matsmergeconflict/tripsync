@@ -171,7 +171,8 @@ export function ParticipantForm({ trip, initial, mode, submitLabel, onSubmit, se
 
   const validate = (only?: StepId): Record<string, string> => {
     const e: Record<string, string> = {};
-    if ((!only || only === "person") && !f.first_name.trim()) e.first_name = "Bitte gib deinen Vornamen an.";
+    if ((!only || only === "person") && !f.first_name.trim()) e.first_name = "Bitte gib den Vornamen an.";
+    if ((!only || only === "person") && !f.last_name.trim()) e.last_name = "Bitte gib den Nachnamen an.";
     if (!only || only === "stay") {
       if (f.arrival_date && f.departure_date && f.departure_date < f.arrival_date) e.departure_date = "Abreise darf nicht vor der Anreise liegen.";
     }
@@ -218,7 +219,7 @@ export function ParticipantForm({ trip, initial, mode, submitLabel, onSubmit, se
           <Field label="Vorname" error={errors.first_name}>
             {(p) => <Input {...p} autoComplete="given-name" value={f.first_name} onChange={(e) => set("first_name", e.target.value)} maxLength={60} required />}
           </Field>
-          <Field label="Nachname" optional error={errors.last_name}>
+          <Field label="Nachname" error={errors.last_name}>
             {(p) => <Input {...p} autoComplete="family-name" value={f.last_name} onChange={(e) => set("last_name", e.target.value)} maxLength={60} />}
           </Field>
         </div>
@@ -499,7 +500,7 @@ export function ParticipantForm({ trip, initial, mode, submitLabel, onSubmit, se
   );
 }
 
-function SkiRangeQuickPick({ trip, onApply }: { trip: FormTrip; onApply: (days: ISODate[]) => void }) {
+export function SkiRangeQuickPick({ trip, onApply }: { trip: FormTrip; onApply: (days: ISODate[]) => void }) {
   const days = eachDay(trip.start_date, trip.end_date);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");

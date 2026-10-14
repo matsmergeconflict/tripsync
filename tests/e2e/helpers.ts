@@ -13,7 +13,7 @@ export interface CreatedTrip {
 export const org = (t: CreatedTrip) => ({ "x-organizer-token": t.orgToken });
 
 /** Legt eine Reise über die API an und liefert Token und Codes zurück. */
-export async function createTrip(request: APIRequestContext, name = "Testreise"): Promise<CreatedTrip> {
+export async function createTrip(request: APIRequestContext, name = "Testreise", opts: { requireApproval?: boolean } = {}): Promise<CreatedTrip> {
   const res = await request.post("/api/trips", {
     data: { name, location: "Hütte", start_date: TRIP_START, end_date: TRIP_END, organizer_name: "Orga" },
   });
@@ -21,6 +21,14 @@ export async function createTrip(request: APIRequestContext, name = "Testreise")
   const body = await res.json();
   const orgToken = body.organizer_url.split("/o/")[1];
   const full = await (await request.get(`/api/trips/${body.trip_id}`, { headers: { "x-organizer-token": orgToken } })).json();
+  if (!opts.requireApproval) {
+    // Die meisten Tests prüfen Berechnungen ohne Bestätigungsschritt
+    const r = await request.patch(`/api/trips/${body.trip_id}`, {
+      headers: { "x-organizer-token": orgToken },
+      data: { version: full.trip.version, require_approval: false },
+    });
+    if (r.status() !== 200) throw new Error(`disable approval ${r.status()}`);
+  }
   return {
     tripId: body.trip_id,
     orgToken,

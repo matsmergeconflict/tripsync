@@ -3,63 +3,64 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { PublicShell } from "@/components/PublicShell";
-import { ParticipantForm, formFromParticipant, toPayload, type FormState, type FormTrip } from "@/components/ParticipantForm";
-import { Button, ErrorBox, Loading, Notice } from "@/components/ui";
+import { GroupForm, groupFromParticipants, groupToPayload, type GroupState } from "@/components/GroupForm";
+import type { FormTrip } from "@/components/ParticipantForm";
+import { Badge, Button, ErrorBox, Loading, Notice } from "@/components/ui";
 import { api, ApiError } from "@/lib/client/api";
 import type { Participant } from "@/lib/types";
 
 type Me = Omit<Participant, "org_note">;
+interface Data {
+  registration: { id: string; contact: string | null; comment: string | null; version: number };
+  participants: Me[];
+  trip: FormTrip & { location: string | null };
+  public_url: string | null;
+}
 
 export function EditClient() {
   const { token } = useParams<{ token: string }>();
-  const headers = { "x-edit-token": token };
-  const [data, setData] = useState<{ participant: Me; trip: FormTrip & { location: string | null }; public_url: string | null } | null>(null);
+  const [data, setData] = useState<Data | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [formKey, setFormKey] = useState(0);
 
-  const load = useCallback(() => {
-    api<NonNullable<typeof data>>("/api/me", { headers: { "x-edit-token": token } })
-      .then((r) => {
-        setData(r);
-        setLoadError(null);
-        setFormKey((k) => k + 1);
-      })
-      .catch((e) => setLoadError(e instanceof ApiError ? e.message : "Fehler beim Laden"));
-  }, [token]);
-  useEffect(load, [load]);
+  const load = useCallback(
+    (notice?: string) =>
+      api<Data>("/api/me", { headers: { "x-edit-token": token } })
+        .then((r) => {
+          setData(r);
+          setLoadError(null);
+          setFormKey((k) => k + 1);
+          if (notice) setError(notice);
+        })
+        .catch((e) => setLoadError(e instanceof ApiError ? e.message : "Fehler beim Laden")),
+    [token]
+  );
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const save = async (f: FormState, statusOverride?: "active" | "withdrawn") => {
+  const save = async (g: GroupState, message: string) => {
     if (!data) return;
     setBusy(true);
-    setErrors({});
+    setError(null);
     setSaved(null);
     try {
-      const res = await api<{ participant: Me }>("/api/me", {
+      const res = await api<Pick<Data, "registration" | "participants">>("/api/me", {
         method: "PATCH",
-        headers,
-        body: { ...toPayload({ ...f, status: statusOverride ?? f.status }), version: data.participant.version },
+        headers: { "x-edit-token": token },
+        body: { ...groupToPayload(g), version: data.registration.version },
       });
-      setData({ ...data, participant: res.participant });
+      setData({ ...data, ...res });
       setFormKey((k) => k + 1);
-      setSaved(
-        statusOverride === "withdrawn"
-          ? "Deine Teilnahme wurde zurückgezogen."
-          : statusOverride === "active"
-            ? "Du bist wieder angemeldet."
-            : "Gespeichert. Die Organisatoren sehen die Änderung sofort."
-      );
+      setSaved(message);
       window.scrollTo({ top: 0 });
     } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.status === 409 && e.current) {
-          setData({ ...data, participant: e.current as Me });
-          setFormKey((k) => k + 1);
-          setErrors({ _: "Deine Anmeldung wurde inzwischen (z. B. von einem Organisator) geändert. Wir haben den aktuellen Stand geladen – bitte prüfe ihn und speichere erneut." });
-        } else setErrors({ ...e.fields, _: e.message });
-      }
+      if (e instanceof ApiError && e.status === 409) {
+        await load("Die Anmeldung wurde inzwischen (z. B. von einem Organisator) geändert. Der aktuelle Stand ist geladen – bitte prüfen und erneut speichern.");
+      } else setError(e instanceof ApiError ? e.message : "Fehler beim Speichern");
     } finally {
       setBusy(false);
     }
@@ -68,7 +69,7 @@ export function EditClient() {
   if (loadError)
     return (
       <PublicShell>
-        <ErrorBox onRetry={load}>
+        <ErrorBox onRetry={() => load()}>
           {loadError}
           <p className="mt-2 text-ink">Falls der Link zurückgesetzt wurde, bitte die Organisatoren um einen neuen.</p>
         </ErrorBox>
@@ -81,30 +82,60 @@ export function EditClient() {
       </PublicShell>
     );
 
-  const p = data.participant;
-  const withdrawn = p.status === "withdrawn";
+  const ps = data.participants;
+  const active = ps.filter((p) => p.status === "active");
+  const pending = active.filter((p) => p.approval === "pending");
+  const rejected = ps.filter((p) => p.approval === "rejected");
+  const allWithdrawn = ps.length > 0 && active.length === 0;
+  const names = (list: Me[]) => list.map((p) => p.first_name).join(", ");
+  const initial = groupFromParticipants(ps, data.registration);
 
   return (
     <PublicShell trip={data.trip}>
       <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold">Hallo {p.first_name}!</h1>
-        <p className="text-sm text-muted">Hier kannst du deine Anmeldung ansehen und ändern. Dieser Link gehört nur dir.</p>
+        <h1 className="text-xl font-semibold">Hallo {ps.length > 1 ? names(ps) : ps[0]?.first_name}!</h1>
+        <p className="text-sm text-muted">Hier könnt ihr eure Anmeldung ansehen und ändern. Dieser Link gehört nur euch.</p>
       </div>
+
+      <div className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-4" data-testid="approval-status">
+        <span className="text-sm font-semibold">Status der Anmeldung</span>
+        <ul className="flex flex-col gap-1.5 text-sm">
+          {ps.map((p) => (
+            <li key={p.id} className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                {p.first_name} {p.last_name}
+              </span>
+              {p.status === "withdrawn" ? (
+                <Badge>zurückgezogen</Badge>
+              ) : p.approval === "approved" ? (
+                <Badge tone="ok">✓ bestätigt</Badge>
+              ) : p.approval === "rejected" ? (
+                <Badge tone="bad">abgelehnt</Badge>
+              ) : (
+                <Badge tone="warn">wartet auf Bestätigung</Badge>
+              )}
+            </li>
+          ))}
+        </ul>
+        {pending.length > 0 && <p className="text-xs text-muted">Die Organisatoren wurden informiert und bestätigen die Anmeldung, sobald sie Zeit haben.</p>}
+        {rejected.length > 0 && <p className="text-xs text-muted">Bei Fragen zur Absage wende dich bitte direkt an die Organisatoren.</p>}
+      </div>
+
       {saved && (
         <Notice tone="ok">
           <span role="status">{saved}</span>
         </Notice>
       )}
-      {errors._ && (
-        <div role="alert" className="rounded-lg bg-danger-soft px-3.5 py-3 text-sm font-medium text-danger">
-          {errors._}
-        </div>
-      )}
-      {withdrawn && (
+      {allWithdrawn && (
         <Notice tone="warn">
-          Du hast deine Teilnahme zurückgezogen. Du erscheinst nicht mehr in den Übersichten.
+          Die Teilnahme ist zurückgezogen. Ihr erscheint nicht mehr in den Übersichten.
           <div className="mt-2">
-            <Button size="sm" variant="primary" onClick={() => save(formFromParticipant(p), "active")} loading={busy}>
+            <Button
+              size="sm"
+              variant="primary"
+              loading={busy}
+              onClick={() => save({ ...initial, persons: initial.persons.map((p) => ({ ...p, status: "active" })) }, "Ihr seid wieder angemeldet.")}
+            >
               Doch wieder teilnehmen
             </Button>
           </div>
@@ -115,25 +146,26 @@ export function EditClient() {
           Gemeinsame Übersicht ansehen →
         </a>
       )}
-      <ParticipantForm
+      <GroupForm
         key={formKey}
         trip={data.trip}
-        initial={formFromParticipant(p)}
+        initial={initial}
         mode="full"
         submitLabel="Änderungen speichern"
         busy={busy}
-        serverErrors={errors}
-        onSubmit={(f) => save(f)}
+        serverError={error}
+        onSubmit={(g) => save(g, "Gespeichert. Die Organisatoren sehen die Änderung sofort.")}
         footer={
-          !withdrawn && (
+          !allWithdrawn && (
             <Button
               type="button"
               variant="danger"
               onClick={() => {
-                if (confirm("Möchtest du deine Teilnahme wirklich zurückziehen? Du kannst sie später wieder aktivieren.")) save(formFromParticipant(p), "withdrawn");
+                if (confirm(ps.length > 1 ? "Wirklich für alle absagen? Ihr könnt die Teilnahme später wieder aktivieren." : "Möchtest du deine Teilnahme wirklich zurückziehen? Du kannst sie später wieder aktivieren."))
+                  save({ ...initial, persons: initial.persons.map((p) => ({ ...p, status: "withdrawn" })) }, ps.length > 1 ? "Die Teilnahme aller Personen wurde zurückgezogen." : "Deine Teilnahme wurde zurückgezogen.");
               }}
             >
-              Teilnahme zurückziehen
+              {ps.length > 1 ? "Für alle absagen" : "Teilnahme zurückziehen"}
             </Button>
           )
         }

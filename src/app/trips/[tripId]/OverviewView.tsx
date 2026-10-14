@@ -4,12 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { useTrip } from "./TripContext";
 import { AddParticipantSheet, AuditList, ParticipantSheet, personName } from "./ParticipantSheet";
+import { PendingApprovals } from "./Approvals";
 import { Badge, Button, Card, CopyLink, Empty, Notice } from "@/components/ui";
 import { formatLong, formatShort } from "@/lib/dates";
 import { ISSUE_LABELS, ISSUE_SEVERITY, computeSkiSummary } from "@/lib/stats";
 
 export function OverviewView() {
-  const { data, active, stats, issues, tripId } = useTrip();
+  const { data, active, pending, stats, issues, tripId } = useTrip();
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const t = data.trip;
@@ -19,7 +20,7 @@ export function OverviewView() {
   const withIssues = active.filter((p) => (issues.get(p.id) ?? []).some((i) => ISSUE_SEVERITY[i] === "missing"));
   const tentative = active.filter((p) => p.stay_status === "tentative");
   const ski = computeSkiSummary(data.participants, t.start_date, t.end_date);
-  const withdrawn = data.participants.length - active.length;
+  const withdrawn = data.participants.filter((p) => p.status === "withdrawn").length;
   const totalMeals = data.meals.length;
 
   return (
@@ -35,8 +36,15 @@ export function OverviewView() {
         <Button onClick={() => setAdding(true)}>+ Person hinzufügen</Button>
       </div>
 
+      <PendingApprovals onOpen={setOpenId} />
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="overview-stats">
-        <Stat label="Angemeldet" value={active.length} sub={withdrawn ? `${withdrawn} zurückgezogen` : undefined} href={`${base}/participants`} />
+        <Stat
+          label="Angemeldet"
+          value={active.length}
+          sub={[pending.length ? `${pending.length} warten auf Bestätigung` : "", withdrawn ? `${withdrawn} zurückgezogen` : ""].filter(Boolean).join(" · ") || undefined}
+          href={`${base}/participants`}
+        />
         <Stat label="Max. gleichzeitig" value={peak?.present ?? 0} sub={peak && peak.present ? `am ${formatShort(peak.day)}` : undefined} href={`${base}/timeline`} />
         <Stat label="Angaben fehlen" value={withIssues.length} tone={withIssues.length ? "warn" : "ok"} sub={tentative.length ? `${tentative.length} unbestätigt` : undefined} href={`${base}/participants?filter=incomplete`} />
         {t.ski_enabled ? (

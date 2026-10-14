@@ -30,7 +30,7 @@ export const PATCH = handle(async (req: NextRequest, ctx: Ctx) => {
   const me = await requireOrganizer(req, tripId);
   await load(tripId, pid);
   const { version, ...input } = await readJson(req, patchSchema);
-  const participant = await tx((c) => updateParticipant(c, pid, version, input, me.actor, { allowOrgFields: true }));
+  const participant = await tx((c) => updateParticipant(c, pid, version, input, me.actor));
   return json({ participant });
 });
 
@@ -41,6 +41,8 @@ export const DELETE = handle(async (req: NextRequest, ctx: Ctx) => {
   const p = await load(tripId, pid);
   await tx(async (c) => {
     await c.query(`DELETE FROM participants WHERE id = $1`, [pid]);
+    // leere Anmeldungsgruppe aufräumen
+    await c.query(`DELETE FROM registrations r WHERE r.id = $1 AND NOT EXISTS (SELECT 1 FROM participants WHERE registration_id = r.id)`, [p.registration_id]);
     await audit(c, tripId, me.actor, "participant", pid, "delete", { name: `${p.first_name} ${p.last_name}`.trim() });
     await notifyTrip(c, tripId);
   });

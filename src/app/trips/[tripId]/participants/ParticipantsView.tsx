@@ -9,7 +9,7 @@ import { formatShort } from "@/lib/dates";
 import { ISSUE_LABELS, ISSUE_SEVERITY, isComplete, isPresent } from "@/lib/stats";
 import type { Participant } from "@/lib/types";
 
-type Filter = "all" | "incomplete" | "confirmed" | "tentative" | "ski" | "withdrawn" | "arrival" | "departure" | "present";
+type Filter = "all" | "pending" | "rejected" | "incomplete" | "confirmed" | "tentative" | "ski" | "withdrawn" | "arrival" | "departure" | "present";
 type SortKey = "name" | "arrival" | "departure" | "status";
 
 export function ParticipantsView() {
@@ -28,7 +28,9 @@ export function ParticipantsView() {
     const rows = data.participants.filter((p) => {
       if (needle && !`${personName(p)} ${p.contact ?? ""}`.toLowerCase().includes(needle)) return false;
       if (filter === "withdrawn") return p.status === "withdrawn";
-      if (p.status === "withdrawn" && filter !== "all") return false;
+      if (filter === "pending") return p.status === "active" && p.approval === "pending";
+      if (filter === "rejected") return p.approval === "rejected";
+      if ((p.status === "withdrawn" || p.approval !== "approved") && filter !== "all") return false;
       switch (filter) {
         case "incomplete":
           return !isComplete(issues.get(p.id) ?? []);
@@ -123,6 +125,8 @@ export function ParticipantsView() {
           <option value="departure">Abreise am …</option>
           <option value="present">Anwesend am …</option>
           <option value="withdrawn">Zurückgezogen</option>
+          <option value="pending">Wartet auf Bestätigung</option>
+          <option value="rejected">Abgelehnt</option>
         </Select>
         {needsDay && (
           <Select aria-label="Tag" value={filterDay} onChange={(e) => setFilterDay(e.target.value)} className="sm:w-44">
@@ -158,7 +162,7 @@ export function ParticipantsView() {
           </thead>
           <tbody className="divide-y divide-line">
             {list.map((p) => (
-              <tr key={p.id} className={cx("cursor-pointer hover:bg-sunken", p.status === "withdrawn" && "text-faint")} onClick={() => setOpenId(p.id)}>
+              <tr key={p.id} className={cx("cursor-pointer hover:bg-sunken", (p.status === "withdrawn" || p.approval === "rejected") && "text-faint")} onClick={() => setOpenId(p.id)}>
                 <td className="px-4 py-2.5">
                   <button type="button" className="font-medium hover:underline" onClick={() => setOpenId(p.id)}>
                     {personName(p)}
@@ -173,7 +177,11 @@ export function ParticipantsView() {
                   {p.departure_time && <span className="text-muted"> {p.departure_time}</span>}
                 </td>
                 <td className="px-3 py-2.5">
-                  {p.status === "withdrawn" ? (
+                  {p.status === "active" && p.approval === "pending" ? (
+                    <Badge tone="info">wartet auf Bestätigung</Badge>
+                  ) : p.approval === "rejected" ? (
+                    <Badge tone="bad">abgelehnt</Badge>
+                  ) : p.status === "withdrawn" ? (
                     <Badge>zurückgezogen</Badge>
                   ) : !p.arrival_date && !p.departure_date ? (
                     <Badge tone="warn">! keine Reisedaten</Badge>
@@ -199,7 +207,15 @@ export function ParticipantsView() {
             <button type="button" onClick={() => setOpenId(p.id)} className={cx("flex w-full flex-col gap-2 rounded-xl border border-line bg-surface p-3 text-left", p.status === "withdrawn" && "opacity-60")}>
               <span className="flex items-center justify-between gap-2">
                 <span className="font-medium">{personName(p)}</span>
-                {p.status === "withdrawn" ? <Badge>zurückgezogen</Badge> : p.stay_status === "tentative" ? <Badge tone="warn">? unbestätigt</Badge> : null}
+                {p.status === "active" && p.approval === "pending" ? (
+                  <Badge tone="info">wartet auf Bestätigung</Badge>
+                ) : p.approval === "rejected" ? (
+                  <Badge tone="bad">abgelehnt</Badge>
+                ) : p.status === "withdrawn" ? (
+                  <Badge>zurückgezogen</Badge>
+                ) : p.stay_status === "tentative" ? (
+                  <Badge tone="warn">? unbestätigt</Badge>
+                ) : null}
               </span>
               <span className="text-sm tabular-nums text-muted">
                 {formatShort(p.arrival_date)} – {formatShort(p.departure_date)}

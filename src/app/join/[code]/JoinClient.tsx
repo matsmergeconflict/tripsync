@@ -3,17 +3,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { PublicShell } from "@/components/PublicShell";
-import { ParticipantForm, emptyForm, toPayload, type FormTrip } from "@/components/ParticipantForm";
+import { GroupForm, emptyGroup, groupToPayload } from "@/components/GroupForm";
+import type { FormTrip } from "@/components/ParticipantForm";
 import { Button, CopyLink, ErrorBox, Loading, Notice } from "@/components/ui";
 import { api, ApiError } from "@/lib/client/api";
+import type { Approval } from "@/lib/types";
+
+interface Done {
+  edit_url: string;
+  public_url: string | null;
+  approval: Approval;
+  ids: string[];
+}
 
 export function JoinClient() {
   const { code } = useParams<{ code: string }>();
   const [trip, setTrip] = useState<(FormTrip & { location: string | null }) | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ edit_url: string; public_url: string | null } | null>(null);
+  const [done, setDone] = useState<Done | null>(null);
 
   const load = useCallback(() => {
     api<{ trip: FormTrip & { location: string | null } }>(`/api/join/${code}`)
@@ -39,16 +48,25 @@ export function JoinClient() {
     );
 
   if (done) {
+    const many = done.ids.length > 1;
     return (
       <PublicShell trip={trip}>
         <div className="flex flex-col gap-4" data-testid="join-done">
-          <Notice tone="ok">
-            <strong>Danke, du bist angemeldet!</strong> Die Organisatoren sehen deine Angaben ab sofort.
-          </Notice>
+          {done.approval === "pending" ? (
+            <Notice tone="info">
+              <strong>Danke, {many ? `eure Anmeldung (${done.ids.length} Personen) ist` : "deine Anmeldung ist"} eingegangen!</strong> Die Organisatoren müssen sie noch
+              bestätigen. Über deinen persönlichen Link siehst du jederzeit den aktuellen Stand.
+            </Notice>
+          ) : (
+            <Notice tone="ok">
+              <strong>Danke, {many ? `ihr seid (${done.ids.length} Personen)` : "du bist"} angemeldet!</strong> Die Organisatoren sehen die Angaben ab sofort.
+            </Notice>
+          )}
           <div className="rounded-xl border border-line bg-surface p-4">
             <h2 className="mb-2 font-semibold">Dein persönlicher Bearbeitungslink</h2>
             <p className="mb-3 text-sm text-muted">
-              Mit diesem Link kannst du deine Angaben jederzeit ändern oder deine Teilnahme zurückziehen. Speichere ihn (z. B. als Lesezeichen) und gib ihn nicht weiter.
+              Mit diesem Link {many ? "könnt ihr die Angaben aller angemeldeten Personen" : "kannst du deine Angaben"} jederzeit ändern, Personen ergänzen oder absagen –
+              und siehst, ob die Anmeldung bestätigt wurde. Speichere ihn (z. B. als Lesezeichen) und gib ihn nicht weiter.
             </p>
             <CopyLink url={done.edit_url} label="Bearbeitungslink" secret />
             <div className="mt-3">
@@ -71,34 +89,29 @@ export function JoinClient() {
     <PublicShell trip={trip}>
       <div>
         <h1 className="text-xl font-semibold">Anmeldung</h1>
-        <p className="text-sm text-muted">Dauert ein bis zwei Minuten. Kein Konto nötig – du kannst alles später noch ändern.</p>
+        <p className="text-sm text-muted">Dauert ein bis zwei Minuten. Kein Konto nötig – alles lässt sich später noch ändern. Familien können sich gemeinsam anmelden.</p>
       </div>
-      <ParticipantForm
+      <GroupForm
         trip={trip}
-        initial={emptyForm()}
+        initial={emptyGroup()}
         mode="wizard"
         submitLabel="Anmeldung absenden"
         busy={busy}
-        serverErrors={errors}
-        onSubmit={async (f) => {
+        serverError={error}
+        onSubmit={async (g) => {
           setBusy(true);
-          setErrors({});
+          setError(null);
           try {
-            const res = await api<{ edit_url: string; public_url: string | null }>(`/api/join/${code}`, { body: toPayload(f) });
+            const res = await api<Done>(`/api/join/${code}`, { body: groupToPayload(g) });
             setDone(res);
             window.scrollTo({ top: 0 });
           } catch (e) {
-            if (e instanceof ApiError) setErrors({ ...e.fields, _: e.message });
+            setError(e instanceof ApiError ? e.message : "Fehler beim Senden");
           } finally {
             setBusy(false);
           }
         }}
       />
-      {errors._ && (
-        <p role="alert" className="text-sm font-medium text-danger">
-          {errors._}
-        </p>
-      )}
     </PublicShell>
   );
 }
