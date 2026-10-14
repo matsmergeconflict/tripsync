@@ -38,6 +38,8 @@ async function connectListener(): Promise<void> {
   client.on("end", reconnect);
   await client.connect();
   await client.query("LISTEN tripsync");
+  // Nach (Wieder-)Verbindung könnten Meldungen verpasst worden sein: alle offenen Ansichten neu laden lassen
+  for (const name of b.emitter.eventNames()) b.emitter.emit(name, "resync");
 }
 
 export function ensureListener(): Promise<void> {

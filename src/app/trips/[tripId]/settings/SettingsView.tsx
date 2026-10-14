@@ -125,7 +125,6 @@ function TripBasics() {
         className="flex flex-col gap-4"
         onSubmit={async (e) => {
           e.preventDefault();
-          if (outside && !confirm(`${outside} Anmeldung(en) liegen dann teilweise außerhalb des Zeitraums und werden als „prüfen“ markiert. Trotzdem speichern?`)) return;
           setBusy(true);
           await patch({ ...f, location: f.location || null });
           setBusy(false);
@@ -139,7 +138,7 @@ function TripBasics() {
           <Field label="Erster Tag">{(p) => <Input {...p} type="date" value={f.start_date} onChange={(e) => setF({ ...f, start_date: e.target.value })} />}</Field>
           <Field label="Letzter Tag">{(p) => <Input {...p} type="date" value={f.end_date} min={f.start_date} onChange={(e) => setF({ ...f, end_date: e.target.value })} />}</Field>
         </div>
-        {outside > 0 && <Notice tone="warn">{outside} Anmeldung(en) liegen außerhalb dieses Zeitraums.</Notice>}
+        {outside > 0 && <Notice tone="warn">{outside} Anmeldung(en) liegen außerhalb dieses Zeitraums. Passe sie zuerst an, sonst kann der Zeitraum nicht gespeichert werden.</Notice>}
         <div>
           <Button type="submit" variant="primary" loading={busy}>
             Speichern

@@ -28,8 +28,11 @@ export function useLive(url: string | null, onChange: () => void): "live" | "con
       setState("live");
       trigger(); // nach Wiederverbindung verpasste Änderungen nachladen
     };
+    // Sicherheitsnetz: ohne offene Verbindung alle 30 s, sonst alle 2 min vollständig neu laden
+    let ticks = 0;
     const poll = setInterval(() => {
-      if (es.readyState !== EventSource.OPEN) cb.current();
+      ticks++;
+      if (es.readyState !== EventSource.OPEN || ticks % 4 === 0) cb.current();
     }, 30_000);
     const onVisible = () => document.visibilityState === "visible" && trigger();
     document.addEventListener("visibilitychange", onVisible);

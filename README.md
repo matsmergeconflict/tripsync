@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TripSync
 
-## Getting Started
+Organisation von Gruppenreisen mit unterschiedlichen An- und Abreisen (Skiurlaub, Hüttenwochenende, Gruppenfahrt).
+Teilnehmer melden sich per Link ohne Konto an. Organisatoren sehen auf einer Gantt-Zeitachse, wer wann da ist,
+und bekommen Tageszahlen, Skipass-Bedarf, Portionen und eine automatische Einkaufsliste.
 
-First, run the development server:
+## Funktionen
+
+- **Zeitachse (Gantt)**: eine Zeile pro Person, Aufenthalt als Balken; An-/Abreise, unbestätigte und fehlende
+  Angaben per Symbol, Muster und Text unterscheidbar; Tageszeile mit Anwesenden, An-/Abreisen, Skipässen, Essen;
+  Suche, Filter, Sortierung, Wochenabschnitte, Tages- und Listenansicht; fixierte Namensspalte.
+- **Anmeldung ohne Konto** in 4 Schritten (Person, Aufenthalt per Kalender, Skipass, Essen) + Prüfen.
+- **Persönlicher Bearbeitungslink**: ändern, ergänzen, zurückziehen. Organisatoren können Links neu erzeugen.
+- **Öffentliche Übersicht** (abschaltbar) mit Anzeigename und Zeitraum – keine privaten Daten.
+- **Teilnehmerverwaltung**: Tabelle/Karten, Filter (An-/Abreise/Anwesend am Tag, Skipass, Angaben fehlen, …),
+  Korrekturen durch Organisatoren mit Änderungsprotokoll.
+- **Skipässe**: Bedarf pro Tag und Kategorie, unklare/unvollständige Wünsche, konfigurierbare Kategorien und Preise.
+- **Essensplanung**: Mahlzeiten pro Tag, Rezepte mit Zutaten, Portionen aus Anmeldungen (überschreibbar).
+- **Einkaufsliste**: deterministische Aggregation mit Einheitenumrechnung, Warengruppen, Abhaken, Teams/Geschäfte,
+  manuelle Artikel, bestätigungspflichtige Vereinheitlichung von Zutatennamen.
+- **Mehrere Organisatoren** gleichzeitig, Live-Aktualisierung, Konflikterkennung.
+- **CSV-Exporte**: Teilnehmer, Tagesübersicht, Skipässe, Essensplan, Einkaufsliste, Küchenliste (vertraulich).
+
+Entscheidungen und Abweichungen von der Spezifikation: [`docs/DECISIONS.md`](docs/DECISIONS.md).
+
+## Lokal starten
+
+Voraussetzungen: Node.js ≥ 20, PostgreSQL ≥ 14.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local          # DATABASE_URL anpassen
+createdb tripsync                   # oder vorhandene Datenbank verwenden
+DATABASE_URL=postgres://… npm run db:migrate
+npm run dev                         # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Demodaten (eine Skiwoche mit 12 Personen, Rezepten und Mahlzeiten) über die laufende App anlegen:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+BASE_URL=http://localhost:3000 npm run db:seed-demo
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Das Skript gibt Organisator-, Einladungs- und öffentlichen Link aus.
 
-## Learn More
+## Tests
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm test               # Unit-Tests: Datumslogik, Tagesstatistik, Skipässe, Einheiten, Einkaufsliste
+npm run test:e2e       # Build + Playwright: API/Berechtigungen, Desktop-Ablauf, Smartphone
+npm run test:all       # Lint, Typen, Unit, E2E
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Die E2E-Tests nutzen eine eigene Datenbank (`TEST_DATABASE_URL`, Standard
+`postgres://tripsync:tripsync@localhost:5432/tripsync_test`), die vor jedem Lauf zurückgesetzt wird.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Deployment (nicht durchgeführt)
 
-## Deploy on Vercel
+Läuft überall, wo Node.js und PostgreSQL verfügbar sind (z. B. Vercel/Render/Fly + Supabase- oder Neon-Postgres):
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. `DATABASE_URL` setzen, optional `APP_URL` (öffentliche Basis-URL für erzeugte Links).
+2. `npm run db:migrate`, dann `npm run build && npm start`.
+3. Backups auf Datenbankebene einrichten.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Hinweis: Live-Aktualisierung nutzt Server-Sent Events mit einer dauerhaften Postgres-Verbindung (`LISTEN`).
+Bei Serverless-Hosting ohne langlebige Verbindungen fällt die App automatisch auf 30-Sekunden-Polling zurück.
+
+## Projektstruktur
+
+```
+db/migrations/          SQL-Schema
+scripts/                Migration, Demodaten
+src/lib/                reine Logik (Datum, Statistik, Einheiten, Einkauf, Validierung)
+src/lib/server/         DB, Auth, Tokens, Realtime, Audit (nur Server)
+src/app/api/            Route Handler (alle Berechtigungsprüfungen)
+src/app/trips/[id]/     Organisatoren-Oberfläche
+src/app/join|edit|view  Teilnehmer- und öffentliche Seiten
+src/components/         Gantt, Kalender, Formular, UI-Bausteine
+tests/unit, tests/e2e   Tests
+```

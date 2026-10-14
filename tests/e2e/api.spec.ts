@@ -61,6 +61,18 @@ test.describe("Reise und Organisatorzugang", () => {
     expect(after.trip.public_enabled).toBe(true);
   });
 
+  test("Zeitraum kann nicht so verkürzt werden, dass Daten verwaisen", async ({ request }) => {
+    const t = await createTrip(request);
+    await join(anon, t, { ...basePerson, arrival_date: "2027-01-16", departure_date: "2027-01-22", ski_days: ["2027-01-22"] });
+    const v = (await getTrip(request, t)).trip.version;
+    const res = await anon.patch(`/api/trips/${t.tripId}`, { headers: org(t), data: { version: v, end_date: "2027-01-21" } });
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toContain("1 Anmeldung");
+    expect((await getTrip(request, t)).trip.end_date).toBe("2027-01-23");
+    // Verlängern ist immer möglich
+    expect((await anon.patch(`/api/trips/${t.tripId}`, { headers: org(t), data: { version: v, end_date: "2027-01-25" } })).status()).toBe(200);
+  });
+
   test("Gleichzeitige Änderungen an der Reise werden erkannt (409)", async ({ request }) => {
     const t = await createTrip(request);
     const { trip } = await getTrip(request, t);

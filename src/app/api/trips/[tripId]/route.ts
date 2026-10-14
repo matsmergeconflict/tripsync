@@ -59,6 +59,33 @@ export const PATCH = handle(async (req: NextRequest, ctx: Ctx) => {
       throw new HttpError(409, "Die Reise wurde zwischenzeitlich von jemand anderem geändert.", { current: before });
     const next = { ...before, ...Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined)) };
     if (next.end_date < next.start_date) throw new HttpError(400, "Ende muss nach dem Beginn liegen", { fields: { end_date: "Ende vor Beginn" } });
+    if (next.start_date !== before.start_date || next.end_date !== before.end_date) {
+      // Keine Daten "verwaisen" lassen: Anmeldungen, Ski-/Essenstage und Mahlzeiten müssen im neuen Zeitraum liegen
+      const { rows: out } = await c.query(
+        `SELECT
+           (SELECT count(*) FROM participants p JOIN stays s ON s.participant_id = p.id
+             WHERE p.trip_id = $1 AND p.status = 'active'
+               AND ((s.arrival_date IS NOT NULL AND (s.arrival_date < $2 OR s.arrival_date > $3))
+                 OR (s.departure_date IS NOT NULL AND (s.departure_date < $2 OR s.departure_date > $3)))) AS stays,
+           (SELECT count(DISTINCT p.id) FROM participants p
+             LEFT JOIN ski_days k ON k.participant_id = p.id LEFT JOIN meal_days m ON m.participant_id = p.id
+             WHERE p.trip_id = $1 AND p.status = 'active'
+               AND ((k.day IS NOT NULL AND (k.day < $2 OR k.day > $3)) OR (m.day IS NOT NULL AND (m.day < $2 OR m.day > $3)))) AS days,
+           (SELECT count(*) FROM meals WHERE trip_id = $1 AND (day < $2 OR day > $3)) AS meals`,
+        [tripId, next.start_date, next.end_date]
+      );
+      const o = out[0];
+      if (o.stays || o.days || o.meals) {
+        const parts = [
+          o.stays && `${o.stays} Anmeldung(en) mit An-/Abreise`,
+          o.days && `${o.days} Person(en) mit Ski- oder Essenstagen`,
+          o.meals && `${o.meals} Mahlzeit(en)`,
+        ].filter(Boolean);
+        throw new HttpError(400, `Der neue Zeitraum ist zu kurz: ${parts.join(", ")} liegen außerhalb. Bitte diese zuerst anpassen.`, {
+          fields: { start_date: "Daten außerhalb", end_date: "Daten außerhalb" },
+        });
+      }
+    }
     const { rows } = await c.query(
       `UPDATE trips SET name=$2, location=$3, start_date=$4, end_date=$5, public_enabled=$6, invite_enabled=$7,
               ski_enabled=$8, ski_categories=$9, ski_notes=$10, version=version+1, updated_at=now()
