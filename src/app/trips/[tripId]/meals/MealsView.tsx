@@ -102,7 +102,7 @@ function MealPlan() {
                             <span className="block text-lg font-semibold tabular-nums" data-testid="meal-servings">
                               {sv.effective}
                             </span>
-                            <span className="block text-[11px] text-muted">{sv.overridden ? `manuell (berechnet ${sv.derived})` : "Portionen"}</span>
+                            <span className="block text-[11px] text-muted">{sv.overridden ? `manuell (berechnet ${sv.derived})` : portions(sv.effective)}</span>
                           </span>
                         </button>
                       </li>
@@ -222,8 +222,8 @@ function MealSheet({ meal, onClose }: { meal: Partial<Meal>; onClose: () => void
         </Field>
         <div className="rounded-xl border border-line p-3">
           <div className="text-sm">
-            Berechnet: <strong className="tabular-nums">{derived.derived}</strong> Portionen{" "}
-            <span className="text-muted">(alle, die an diesem Tag mitessen)</span>
+            Berechnet: <strong className="tabular-nums">{derived.derived}</strong> {portions(derived.derived)}{" "}
+            <span className="text-muted">({derived.derived === 1 ? "1 Person isst" : `${derived.derived} Personen essen`} an diesem Tag laut Anmeldungen mit)</span>
             {derived.unknown > 0 && <div className="text-xs text-amber-ink">{derived.unknown} anwesende Personen haben noch keine Angabe zum Essen gemacht.</div>}
           </div>
           <label className="mt-3 flex min-h-11 items-center gap-2 text-sm">
@@ -239,13 +239,23 @@ function MealSheet({ meal, onClose }: { meal: Partial<Meal>; onClose: () => void
         {recipe && (
           <details className="rounded-xl border border-line p-3 text-sm">
             <summary className="cursor-pointer font-medium">
-              Zutaten für {effective} Portionen (Rezept für {formatQuantity(recipe.base_servings)})
+              Zutaten für {effective} {portions(effective)}
             </summary>
+            <p className="mt-1 text-xs text-muted">
+              Das Rezept ist für {formatQuantity(recipe.base_servings)} {portions(recipe.base_servings)} angelegt. Die Mengen werden auf {effective} {portions(effective)} umgerechnet.
+            </p>
             <ul className="mt-2 flex flex-col gap-1">
               {recipe.ingredients.map((i) => (
                 <li key={i.id} className="flex justify-between gap-3">
                   <span>{i.name}</span>
-                  <span className="tabular-nums text-muted">{formatAmount(i.quantity === null ? null : (i.quantity * effective) / recipe.base_servings, i.unit)}</span>
+                  <span className="text-right tabular-nums">
+                    {formatAmount(i.quantity === null ? null : (i.quantity * effective) / recipe.base_servings, i.unit)}
+                    {i.quantity !== null && (
+                      <span className="block text-[11px] text-muted">
+                        Rezept: {formatAmount(i.quantity, i.unit)} für {formatQuantity(recipe.base_servings)}
+                      </span>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -307,7 +317,7 @@ function Recipes() {
               <button key={r.id} type="button" onClick={() => setEditing(r)} className="flex flex-col gap-1 rounded-xl border border-line bg-surface p-4 text-left hover:border-pine-200">
                 <span className="font-semibold">{r.name}</span>
                 <span className="text-sm text-muted">
-                  für {formatQuantity(r.base_servings)} Portionen · {r.ingredients.length} Zutaten
+                  für {formatQuantity(r.base_servings)} {portions(r.base_servings)} · {r.ingredients.length} {r.ingredients.length === 1 ? "Zutat" : "Zutaten"}
                 </span>
                 <span>{used ? <Badge tone="ok">{used}× eingeplant</Badge> : <Badge>nicht eingeplant</Badge>}</span>
               </button>
@@ -339,7 +349,7 @@ function RecipeSheet({ recipe, onClose }: { recipe: Partial<Recipe>; onClose: ()
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  const add = () => setRows((r) => [...r, { key: Date.now(), name: "", quantity: "", unit: "g", category: "", note: "" }]);
+  const add = () => setRows((r) => [...r, { key: Date.now(), name: "", quantity: "", unit: "", category: "", note: "" }]);
   const upd = (key: number, patch: Partial<IngRow>) => setRows((r) => r.map((x) => (x.key === key ? { ...x, ...patch } : x)));
 
   const parseQty = (s: string): number | null | "invalid" => {
@@ -389,7 +399,7 @@ function RecipeSheet({ recipe, onClose }: { recipe: Partial<Recipe>; onClose: ()
           <Field label="Name" error={errors.name}>
             {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />}
           </Field>
-          <Field label="Für Portionen" error={errors.base_servings}>
+          <Field label="Für wie viele Portionen?" hint="Die Zutatenmengen unten gelten für diese Anzahl." error={errors.base_servings}>
             {(p) => <Input {...p} inputMode="decimal" value={servings} onChange={(e) => setServings(e.target.value)} />}
           </Field>
         </div>
@@ -411,7 +421,7 @@ function RecipeSheet({ recipe, onClose }: { recipe: Partial<Recipe>; onClose: ()
               <li key={r.key} className="grid grid-cols-[1fr_80px_80px_auto] gap-2 rounded-lg border border-line p-2 sm:grid-cols-[1.4fr_80px_80px_1fr_auto]" data-testid="ingredient-row">
                 <Input aria-label="Zutat" placeholder="Zutat" value={r.name} onChange={(e) => upd(r.key, { name: e.target.value })} maxLength={120} />
                 <Input aria-label="Menge" placeholder="Menge" inputMode="decimal" value={r.quantity} onChange={(e) => upd(r.key, { quantity: e.target.value })} />
-                <Input aria-label="Einheit" placeholder="Einheit" list="units" value={r.unit} onChange={(e) => upd(r.key, { unit: e.target.value })} maxLength={20} />
+                <Input aria-label="Einheit" placeholder="z. B. g, l, Stk" list="units" value={r.unit} onChange={(e) => upd(r.key, { unit: e.target.value })} maxLength={20} />
                 <Input aria-label="Warengruppe" placeholder="Warengruppe" list="categories" value={r.category} onChange={(e) => upd(r.key, { category: e.target.value })} className="col-span-3 sm:col-span-1" maxLength={60} />
                 <Button type="button" variant="ghost" size="sm" aria-label={`${r.name || "Zutat"} entfernen`} onClick={() => setRows((x) => x.filter((y) => y.key !== r.key))} className="row-start-1 col-start-4 sm:col-start-5">
                   ✕
@@ -424,7 +434,7 @@ function RecipeSheet({ recipe, onClose }: { recipe: Partial<Recipe>; onClose: ()
               + Zutat
             </Button>
           </div>
-          <p className="text-xs text-muted">Menge leer lassen für „nach Bedarf“. Kompatible Einheiten (g/kg, ml/l) werden in der Einkaufsliste automatisch zusammengerechnet.</p>
+          <p className="text-xs text-muted">Mengen gelten für die oben angegebene Portionszahl. Getränke in l oder ml, feste Zutaten in g/kg oder Stk. Ohne Einheit zählt die Menge als Stück. Menge leer lassen für „nach Bedarf“. Kompatible Einheiten (g/kg, ml/l) werden in der Einkaufsliste automatisch zusammengerechnet.</p>
         </div>
         <Field label="Zubereitung / Notizen" optional>
           {(p) => <Textarea {...p} rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={4000} />}
@@ -457,4 +467,8 @@ function RecipeSheet({ recipe, onClose }: { recipe: Partial<Recipe>; onClose: ()
       </form>
     </Sheet>
   );
+}
+
+function portions(n: number): string {
+  return n === 1 ? "Portion" : "Portionen";
 }

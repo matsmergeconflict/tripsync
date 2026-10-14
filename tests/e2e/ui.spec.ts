@@ -148,7 +148,7 @@ test("Essensplanung: Mahlzeit mit Rezept erzeugt Einkaufsliste", async ({ page }
   await page.getByRole("button", { name: "+ Rezept anlegen" }).click();
   const rd = page.getByRole("dialog");
   await rd.getByLabel("Name", { exact: true }).fill("Nudeln");
-  await rd.getByLabel("Für Portionen").fill("2");
+  await rd.getByLabel("Für wie viele Portionen?").fill("2");
   await rd.getByRole("button", { name: "+ Zutat" }).click();
   const ing = rd.getByTestId("ingredient-row").first();
   await ing.getByLabel("Zutat", { exact: true }).fill("Spaghetti");
