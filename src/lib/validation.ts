@@ -10,6 +10,16 @@ const optText = (max: number) =>
     .optional()
     .transform((v) => (v ? v : null));
 
+/** Wie optText, aber "nicht gesendet" bleibt undefined (für Teil-Updates). */
+const patchText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max, `Maximal ${max} Zeichen`)
+    .nullable()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v ? v : null));
+
 export const isoDate = z.string().refine(isISODate, "Ungültiges Datum");
 const optDate = isoDate.nullable().optional().transform((v) => v ?? null);
 const optTime = z
@@ -93,14 +103,14 @@ export const tripCreateSchema = z
 export const tripUpdateSchema = z.object({
   version: z.number().int(),
   name: z.string().trim().min(1).max(120).optional(),
-  location: optText(120),
+  location: patchText(120),
   start_date: isoDate.optional(),
   end_date: isoDate.optional(),
   public_enabled: z.boolean().optional(),
   invite_enabled: z.boolean().optional(),
   ski_enabled: z.boolean().optional(),
   ski_categories: z.array(skiCategorySchema).max(20).optional(),
-  ski_notes: optText(2000),
+  ski_notes: patchText(2000),
 });
 
 export const mealSchema = z.object({

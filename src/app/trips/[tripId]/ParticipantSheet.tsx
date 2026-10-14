@@ -15,6 +15,7 @@ export function personName(p: Pick<Participant, "first_name" | "last_name">) {
 
 interface AuditEntry {
   id: number;
+  entity: string;
   actor_type: string;
   actor_label: string | null;
   action: string;
@@ -46,12 +47,54 @@ const FIELD_LABELS: Record<string, string> = {
   allergies: "Allergien",
 };
 
+const VALUE_LABELS: Record<string, string> = {
+  confirmed: "bestätigt",
+  tentative: "unklar",
+  active: "angemeldet",
+  withdrawn: "zurückgezogen",
+  yes: "ja",
+  no: "nein",
+  unknown: "unklar",
+  all_present: "an allen Tagen",
+  custom: "einzelne Tage",
+  none: "nein",
+  omnivore: "Alles",
+  vegetarian: "Vegetarisch",
+  vegan: "Vegan",
+  pescetarian: "Pescetarisch",
+  other: "Sonstiges",
+};
+
 function fmt(v: unknown): string {
   if (v === null || v === undefined || v === "") return "–";
+  if (typeof v === "string" && VALUE_LABELS[v]) return VALUE_LABELS[v];
   if (Array.isArray(v)) return v.length ? v.map((x) => (typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x) ? formatShort(x) : String(x))).join(", ") : "–";
   if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return formatShort(v);
   if (typeof v === "boolean") return v ? "ja" : "nein";
   return String(v);
+}
+
+const ENTITIES: Record<string, string> = {
+  trip: "Reise",
+  participant: "Anmeldung",
+  organizer: "Organisator",
+  meal: "Mahlzeit",
+  recipe: "Rezept",
+  shopping_item: "Einkaufsposten",
+  ingredient_alias: "Zutaten",
+};
+
+/** Kurzbezeichnung des betroffenen Eintrags aus den protokollierten Daten. */
+function subject(e: AuditEntry): string | null {
+  const c = e.changes as Record<string, unknown> | null;
+  if (!c) return null;
+  const val = (k: string) => {
+    const v = c[k];
+    if (v && typeof v === "object" && "to" in (v as object)) return (v as { to: unknown }).to;
+    return v;
+  };
+  const name = val("dish") ?? val("name") ?? ([val("first_name"), val("last_name")].filter(Boolean).join(" ") || null) ?? val("canonical");
+  return typeof name === "string" && name ? name : null;
 }
 
 export function AuditList({ entityId }: { entityId?: string }) {
@@ -92,7 +135,10 @@ export function AuditList({ entityId }: { entityId?: string }) {
               {new Date(e.created_at).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}
             </time>
           </div>
-          <div className="mt-1 text-muted">{ACTIONS[e.action] ?? e.action}</div>
+          <div className="mt-1 text-muted">
+            {ENTITIES[e.entity] && <span className="text-ink">{ENTITIES[e.entity]}</span>}
+            {subject(e) && <span className="text-ink"> „{subject(e)}“</span>} {ACTIONS[e.action] ?? e.action}
+          </div>
           {e.changes && e.action === "update" && (
             <ul className="mt-2 flex flex-col gap-1 text-xs">
               {Object.entries(e.changes).map(([k, c]) => (

@@ -112,18 +112,28 @@ function ShoppingItem({ r, onState }: { r: ShoppingRow; onState: (p: { checked?:
   const { tripId, reload, toast } = useTrip();
   const [teamDraft, setTeamDraft] = useState(r.team ?? "");
   const [open, setOpen] = useState(false);
+  // Sofortige Rückmeldung beim Abhaken; der Serverstand gewinnt, sobald er eintrifft
+  const [checked, setChecked] = useState(r.checked);
+  const [synced, setSynced] = useState(r.checked);
+  if (synced !== r.checked) {
+    setSynced(r.checked);
+    setChecked(r.checked);
+  }
   return (
-    <li className={cx("px-4 py-2.5", r.checked && "bg-sunken/60")} data-testid="shopping-item" data-name={r.name}>
+    <li className={cx("px-4 py-2.5", checked && "bg-sunken/60")} data-testid="shopping-item" data-name={r.name}>
       <div className="flex items-center gap-3">
         <input
           type="checkbox"
           className="size-6 shrink-0 accent-pine-600"
-          checked={r.checked}
-          onChange={(e) => onState({ checked: e.target.checked })}
+          checked={checked}
+          onChange={(e) => {
+            setChecked(e.target.checked);
+            onState({ checked: e.target.checked });
+          }}
           aria-label={`${r.name} erledigt`}
         />
         <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          <span className={cx("block font-medium", r.checked && "text-muted line-through")}>{r.name}</span>
+          <span className={cx("block font-medium", checked && "text-muted line-through")}>{r.name}</span>
           <span className="flex flex-wrap gap-1 pt-0.5">
             {r.manual && <Badge>manuell</Badge>}
             {r.unitConflict && <Badge tone="warn">auch in anderer Einheit</Badge>}

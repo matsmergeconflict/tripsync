@@ -6,6 +6,7 @@ import { useParams, usePathname } from "next/navigation";
 import { TripProvider, useTrip } from "./TripContext";
 import { Button, ErrorBox, Loading, cx } from "@/components/ui";
 import { formatShort } from "@/lib/dates";
+import { isComplete } from "@/lib/stats";
 
 const NAV = [
   { href: "", label: "Übersicht", icon: "M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z" },
@@ -28,7 +29,7 @@ function Icon({ d }: { d: string }) {
 function NavLinks({ base, onNavigate }: { base: string; onNavigate?: () => void }) {
   const pathname = usePathname();
   const { issues, active, data } = useTrip();
-  const openIssues = active.filter((p) => (issues.get(p.id) ?? []).length > 0).length;
+  const openIssues = active.filter((p) => !isComplete(issues.get(p.id) ?? [])).length;
   return (
     <nav aria-label="Hauptnavigation" className="flex flex-col gap-0.5">
       {NAV.filter((n) => n.href !== "/ski" || data.trip.ski_enabled).map((n) => {

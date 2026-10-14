@@ -64,7 +64,9 @@ export function ParticipantsView() {
   }, [data.participants, q, filter, filterDay, sort, issues]);
 
   const skiLabel = (p: Participant) =>
-    !data.trip.ski_enabled ? null : p.ski_need === "yes" ? (
+    !data.trip.ski_enabled ? null : p.ski_need === "yes" && !p.ski_days.length ? (
+      <Badge tone="warn">❄ Tage fehlen</Badge>
+    ) : p.ski_need === "yes" ? (
       <Badge tone="info">❄ {p.ski_days.length} Tage</Badge>
     ) : p.ski_need === "no" ? (
       <Badge>kein Skipass</Badge>
@@ -171,7 +173,15 @@ export function ParticipantsView() {
                   {p.departure_time && <span className="text-muted"> {p.departure_time}</span>}
                 </td>
                 <td className="px-3 py-2.5">
-                  {p.status === "withdrawn" ? <Badge>zurückgezogen</Badge> : p.stay_status === "tentative" ? <Badge tone="warn">? unbestätigt</Badge> : <Badge tone="ok">bestätigt</Badge>}
+                  {p.status === "withdrawn" ? (
+                    <Badge>zurückgezogen</Badge>
+                  ) : !p.arrival_date && !p.departure_date ? (
+                    <Badge tone="warn">! keine Reisedaten</Badge>
+                  ) : p.stay_status === "tentative" ? (
+                    <Badge tone="warn">? unbestätigt</Badge>
+                  ) : (
+                    <Badge tone="ok">bestätigt</Badge>
+                  )}
                 </td>
                 {data.trip.ski_enabled && <td className="px-3 py-2.5">{skiLabel(p)}</td>}
                 <td className="px-3 py-2.5">{completeness(p)}</td>

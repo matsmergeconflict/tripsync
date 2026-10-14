@@ -81,8 +81,8 @@ export function TimelineView() {
         />
       </div>
 
-      <div className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-3 sm:flex-row sm:flex-wrap sm:items-center">
-        <Input type="search" placeholder="Name suchen …" aria-label="Name suchen" value={q} onChange={(e) => setQ(e.target.value)} className="sm:w-56" />
+      <div className="grid grid-cols-2 gap-2 rounded-xl border border-line bg-surface p-3 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+        <Input type="search" placeholder="Name suchen …" aria-label="Name suchen" value={q} onChange={(e) => setQ(e.target.value)} className="col-span-2 sm:w-56" />
         <Select aria-label="Filter" value={filter} onChange={(e) => setFilter(e.target.value as Filter)} className="sm:w-56">
           <option value="all">Alle Anmeldungen</option>
           <option value="confirmed">Nur bestätigte Angaben</option>
@@ -106,7 +106,7 @@ export function TimelineView() {
           </Select>
         )}
         {view === "gantt" && data.trip.ski_enabled && (
-          <label className="flex min-h-11 items-center gap-2 text-sm">
+          <label className="col-span-2 flex min-h-11 items-center gap-2 text-sm">
             <input type="checkbox" className="size-5 accent-pine-600" checked={showSki} onChange={(e) => setShowSki(e.target.checked)} />
             Skitage zeigen
           </label>

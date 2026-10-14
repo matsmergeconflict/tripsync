@@ -79,8 +79,10 @@ export function Gantt({ days, rows, stats, statKeys = ["present", "arrivals", "d
   const statRows = stats ? statKeys.length : 0;
   const firstDataRow = headerRows + statRows + 1;
 
+  // Tagesspalten wachsen auf großen Bildschirmen mit, unterschreiten aber nie die Mindestbreite
   const gridStyle: CSSProperties = {
-    gridTemplateColumns: `var(--name-w) repeat(${days.length}, var(--day-w))`,
+    gridTemplateColumns: `var(--name-w) repeat(${days.length}, minmax(var(--day-w), 1fr))`,
+    minWidth: `calc(var(--name-w) + ${days.length} * var(--day-w))`,
   };
 
   const isWeekend = (d: ISODate) => weekdayIndex(d) >= 5;
@@ -90,7 +92,7 @@ export function Gantt({ days, rows, stats, statKeys = ["present", "arrivals", "d
       className="scroll-x relative rounded-xl border border-line bg-surface [--day-w:42px] [--name-w:118px] sm:max-h-[74vh] sm:overflow-y-auto sm:[--day-w:52px] sm:[--name-w:200px]"
       data-testid="gantt"
     >
-      <div className="grid w-max min-w-full" style={gridStyle} role="table" aria-label="Zeitachse der Anwesenheiten" aria-rowcount={rows.length + 1}>
+      <div className="grid w-full" style={gridStyle} role="table" aria-label="Zeitachse der Anwesenheiten" aria-rowcount={rows.length + 1}>
         {/* Wochenzeile */}
         <div role="row" className="contents">
           <div className="sticky left-0 top-0 z-30 h-[25px] border-b border-line bg-surface" style={{ gridColumn: 1, gridRow: 1 }} />
