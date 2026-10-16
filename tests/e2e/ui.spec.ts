@@ -39,18 +39,33 @@ test("End-to-End: Reise anlegen, anmelden, live sehen, ändern, öffentlich anse
   await p.goto(invite);
   await p.getByLabel("Vorname").fill("Mia");
   await p.getByLabel("Nachname").fill("Muster");
-  await p.getByLabel("Kontakt").fill("mia@example.com");
+  await p.getByLabel("Handynummer").fill("+49 170 5555555");
+  await p.getByLabel("E-Mail").fill("mia@example.com");
+  // Pflichtfeld Geburtstag: ohne geht es nicht weiter
   await p.getByRole("button", { name: "Weiter", exact: true }).click();
+  await expect(p.getByText("Geburtstag fehlt")).toBeVisible();
+  await p.getByLabel("Geburtstag").fill("03.04.1990");
+  await p.getByRole("button", { name: "Weiter", exact: true }).click();
+  // keine Uhrzeiten, keine "Wie sicher"-Abfrage mehr
+  await expect(p.getByText("Ankunftszeit")).toHaveCount(0);
+  await expect(p.getByText("Wie sicher")).toHaveCount(0);
   const range = p.getByRole("group", { name: "Anreise und Abreise wählen" });
   await range.locator('[data-day="2027-01-17"]').click();
   await range.locator('[data-day="2027-01-20"]').click();
   await expect(p.getByTestId("arrival-display")).toHaveText("So 17.01.");
   await expect(p.getByTestId("departure-display")).toHaveText("Mi 20.01.");
   await p.getByRole("button", { name: "Weiter", exact: true }).click();
-  await p.getByRole("radiogroup", { name: "Skipass erforderlich" }).getByText("Ja", { exact: true }).click();
-  await p.getByRole("button", { name: "Ohne An- und Abreisetag" }).click();
-  await expect(p.getByTestId("ski-day-count")).toContainText("2 Skitage");
+  await expect(p.getByText("6-in-8")).toBeVisible();
+  const skiOpts = p.getByRole("radiogroup", { name: "Skipass erforderlich" });
+  await expect(skiOpts.getByRole("radio")).toHaveCount(2); // nur Ja/Nein
+  await skiOpts.getByText("Ja", { exact: true }).click();
+  const skiCal = p.getByRole("group", { name: "Skipass erforderlich: Skitage" });
+  await expect(skiCal.locator('[data-day="2027-01-16"]')).toHaveAttribute("data-disabled", "true"); // 1. Reisetag
+  await skiCal.locator('[data-day="2027-01-18"]').click();
+  await skiCal.locator('[data-day="2027-01-19"]').click();
+  await expect(p.getByTestId("ski-day-count")).toContainText("2 Tage");
   await p.getByLabel("Passkategorie").selectOption({ label: "Erwachsene" });
+  await expect(p.getByText("Geburtsjahr 1990")).toBeVisible();
   await p.getByRole("button", { name: "Weiter", exact: true }).click();
   await p.getByLabel("Ernährungsweise").selectOption("vegetarian");
   await p.getByLabel(/Allergien/).fill("Sellerie");
@@ -72,7 +87,7 @@ test("End-to-End: Reise anlegen, anmelden, live sehen, ändern, öffentlich anse
   await pendingGroup.getByRole("button", { name: "Bestätigen" }).click();
   await expect(orgPage.getByTestId("notify-box")).toContainText("Mia");
   const wa = await orgPage.getByRole("link", { name: "Per WhatsApp benachrichtigen" }).getAttribute("href");
-  expect(wa).toMatch(/^https:\/\/wa\.me\/\?text=.*best%C3%A4tigt/);
+  expect(wa).toMatch(/^https:\/\/wa\.me\/491705555555\?text=.*best%C3%A4tigt/);
   await orgPage.getByRole("link", { name: "Zeitachse" }).first().click();
 
   // 3b. Nach Bestätigung in der Zeitachse (AK 4, AK 8)
@@ -93,14 +108,12 @@ test("End-to-End: Reise anlegen, anmelden, live sehen, ändern, öffentlich anse
   const range2 = p.getByRole("group", { name: "Anreise und Abreise wählen" });
   await range2.locator('[data-day="2027-01-18"]').click();
   await range2.locator('[data-day="2027-01-21"]').click();
-  await p.getByRole("radiogroup", { name: "Status der Angaben" }).getByText("Noch unklar").click();
   await p.getByRole("button", { name: "Änderungen speichern" }).click();
   await expect(p.getByRole("status").filter({ hasText: "Gespeichert" })).toBeVisible();
 
   // Organisator sieht die Änderung live
   await expect(bar).toHaveAttribute("data-start", "2027-01-18", { timeout: 10_000 });
   await expect(bar).toHaveAttribute("data-end", "2027-01-21");
-  await expect(bar).toHaveAttribute("data-status", "tentative");
   await expect(orgPage.locator('[data-stat="present"][data-day="2027-01-17"]')).toContainText("0");
 
   // Detailansicht beim Klick auf den Namen inkl. vertraulicher Angaben für Organisatoren
@@ -206,40 +219,67 @@ test("Familienanmeldung: gemeinsamer Kopf, Abweichung pro Person, alle zählen",
   const { trip_id, organizer_url } = await res.json();
   const orgToken = organizer_url.split("/o/")[1];
   const full = await (await request.get(`/api/trips/${trip_id}`, { headers: { "x-organizer-token": orgToken } })).json();
+  // Eigene Texte im Formular
+  await request.patch(`/api/trips/${trip_id}`, {
+    headers: { "x-organizer-token": orgToken },
+    data: { version: full.trip.version, form_texts: { persons_title: "Wer fährt mit?", stay_differs: "Kommt jemand anders?" } },
+  });
   const invite = full.links.invite;
 
   const ctx = await browser.newContext();
   const p = await ctx.newPage();
   await p.goto(invite);
+  await expect(p.getByRole("heading", { name: /Wer fährt mit\?/ })).toBeVisible();
   const persons = p.getByTestId("person-entry");
-  await persons.nth(0).getByLabel("Vorname").fill("Eva");
+  const fill = async (i: number, first: string, birth: string) => {
+    const e = persons.nth(i);
+    await e.getByLabel("Vorname").fill(first);
+    await e.getByLabel("Handynummer").fill(`+49 170 00000${i}0`);
+    await e.getByLabel("E-Mail").fill(`${first.toLowerCase()}@example.com`);
+    await e.getByLabel("Geburtstag").fill(birth);
+  };
   await persons.nth(0).getByLabel("Nachname").fill("Kraus");
+  await fill(0, "Eva", "12.05.1980");
   await p.getByRole("button", { name: "+ Weitere Person anmelden" }).click();
   await expect(persons.nth(1).getByLabel("Nachname")).toHaveValue("Kraus"); // Nachname wird übernommen
-  await persons.nth(1).getByLabel("Vorname").fill("Finn");
+  await expect(persons.nth(1).getByLabel("Handynummer")).toHaveValue("+49 ");
+  await fill(1, "Finn", "01.03.2012");
   await p.getByRole("button", { name: "+ Weitere Person anmelden" }).click();
-  await persons.nth(2).getByLabel("Vorname").fill("Greta");
+  await fill(2, "Greta", "20.08.2016");
   await p.getByRole("button", { name: "Weiter", exact: true }).click();
 
-  // Kopf: gemeinsamer Zeitraum
+  // Kopf: gemeinsamer Zeitraum; Greta reist früher ab
   const head = p.getByRole("group", { name: "Gemeinsame Anreise und Abreise für alle" });
   await head.locator('[data-day="2027-01-16"]').click();
   await head.locator('[data-day="2027-01-22"]').click();
-  // Greta reist früher ab
-  await p.getByText("Greta: andere Daten").click();
+  await expect(p.getByText("Kommt jemand anders?")).toBeVisible();
+  await p.getByText("Greta reist anders an oder ab").click();
   const greta = p.getByRole("group", { name: "Anreise und Abreise für Greta" });
   await greta.locator('[data-day="2027-01-16"]').click();
   await greta.locator('[data-day="2027-01-19"]').click();
   await p.getByRole("button", { name: "Weiter", exact: true }).click();
 
-  // Ski: alle ja, Greta nicht
+  // Ski: alle ja (Zeitraum 17.–21.), Greta nicht
   await p.getByRole("radiogroup", { name: "Skipass erforderlich" }).getByText("Ja", { exact: true }).click();
-  await p.getByRole("button", { name: "Ohne An- und Abreisetag" }).first().click();
-  await p.getByText("Greta: anderer Skipass-Wunsch").click();
+  const skiCal = p.getByRole("group", { name: "Skipass erforderlich: Skitage" });
+  await skiCal.locator('[data-day="2027-01-17"]').click();
+  await skiCal.locator('[data-day="2027-01-21"]').click();
+  await p.getByText("Für Greta anders").click();
   await p.getByRole("radiogroup", { name: "Skipass für Greta" }).getByText("Nein", { exact: true }).click();
   await p.getByLabel("Eva", { exact: true }).selectOption({ label: "Erwachsene" });
   await p.getByLabel("Finn", { exact: true }).selectOption({ label: "Kinder" });
+  await expect(p.getByText("Geburtsjahr 2012")).toBeVisible();
   await p.getByRole("button", { name: "Weiter", exact: true }).click();
+
+  // Essen: nur Ernährung (Pflicht) und Allergien
+  await expect(p.getByText("Nur an bestimmten Tagen")).toHaveCount(0);
+  await p.getByRole("button", { name: "Weiter", exact: true }).click();
+  await expect(p.getByText("Bitte Ernährungsweise wählen").first()).toBeVisible();
+  const diets = p.getByLabel("Ernährungsweise");
+  await expect(diets.first().locator("option")).toHaveText(["Bitte wählen …", "Alles", "Vegetarisch", "Vegan"]);
+  await diets.nth(0).selectOption("omnivore");
+  await diets.nth(1).selectOption("vegetarian");
+  await diets.nth(2).selectOption("omnivore");
   await p.getByRole("button", { name: "Weiter", exact: true }).click();
   const review = p.getByTestId("review");
   await expect(review).toContainText("Eva Kraus");
@@ -255,9 +295,12 @@ test("Familienanmeldung: gemeinsamer Kopf, Abweichung pro Person, alle zählen",
   await expect(o.getByTestId("notify-box")).toBeVisible();
   const days = await (await o.request.get(`/api/trips/${trip_id}/export?type=days`, { headers: { "x-organizer-token": orgToken } })).text();
   const line = (d: string) => days.split("\r\n").find((l) => l.startsWith(d))!.split(";").map(Number);
-  expect(line("2027-01-17").slice(1, 2)).toEqual([3]); // anwesend
+  expect(line("2027-01-17")[1]).toBe(3); // anwesend
   expect(line("2027-01-17")[6]).toBe(2); // Skipässe (Greta nicht)
+  expect(line("2027-01-17")[7]).toBe(3); // alle Anwesenden essen mit
   expect(line("2027-01-20")[1]).toBe(2); // Greta schon abgereist
+  const ski = await (await o.request.get(`/api/trips/${trip_id}/export?type=ski`, { headers: { "x-organizer-token": orgToken } })).text();
+  expect(ski).toContain("Finn;Kraus;2012;01.03.2012;ja;Kinder;2027-01-17;2027-01-21;5");
 
   // Bearbeitungslink zeigt alle drei als bestätigt
   const editUrl = await p.getByTestId("copy-link-input").inputValue();

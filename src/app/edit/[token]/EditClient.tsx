@@ -51,7 +51,7 @@ export function EditClient() {
       const res = await api<Pick<Data, "registration" | "participants">>("/api/me", {
         method: "PATCH",
         headers: { "x-edit-token": token },
-        body: { ...groupToPayload(g), version: data.registration.version },
+        body: { ...groupToPayload(g, data.trip), version: data.registration.version },
       });
       setData({ ...data, ...res });
       setFormKey((k) => k + 1);

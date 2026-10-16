@@ -6,7 +6,7 @@ test("Zeitachse und Anmeldung auf dem Smartphone", async ({ page, request }) => 
   const t = await createTrip(request, "Mobil");
   const names = ["Anna", "Ben", "Clara", "David", "Eva", "Finn"];
   for (const [i, n] of names.entries())
-    await join(request, t, { ...basePerson, first_name: n, arrival_date: `2027-01-1${6 + (i % 3)}`, departure_date: "2027-01-23", ski_days: [] });
+    await join(request, t, { ...basePerson, first_name: n, arrival_date: `2027-01-1${6 + (i % 3)}`, departure_date: "2027-01-23", ski_need: "no", ski_days: [] });
   const { trip } = await getTrip(request, t);
   await request.patch(`/api/trips/${t.tripId}`, { headers: org(t), data: { version: trip.version, public_enabled: true } });
 
@@ -39,6 +39,11 @@ test("Zeitachse und Anmeldung auf dem Smartphone", async ({ page, request }) => 
   await page.goto(`/join/${t.invite}`);
   await page.getByLabel("Vorname").fill("Handy");
   await page.getByLabel("Nachname").fill("Nutzer");
+  await expect(page.getByLabel("Handynummer")).toHaveValue("+49 ");
+  await page.getByLabel("Handynummer").fill("+49 151 2345678");
+  await page.getByLabel("E-Mail").fill("handy@example.com");
+  await page.getByLabel("Geburtstag").pressSequentially("01022010");
+  await expect(page.getByLabel("Geburtstag")).toHaveValue("01.02.2010");
   await page.getByRole("button", { name: "Weiter", exact: true }).click();
   const range = page.getByRole("group", { name: "Anreise und Abreise wählen" });
   const day = range.locator('[data-day="2027-01-18"]');
@@ -50,6 +55,7 @@ test("Zeitachse und Anmeldung auf dem Smartphone", async ({ page, request }) => 
   await page.getByRole("radiogroup", { name: "Skipass erforderlich" }).getByText("Nein").click();
   await page.getByRole("button", { name: "Weiter", exact: true }).click();
   await page.getByLabel("Ernährungsweise").selectOption("vegan");
+  await expect(page.getByText("Vegan wird nicht extra gekocht")).toBeVisible();
   await page.getByRole("button", { name: "Weiter", exact: true }).click();
   await page.getByRole("button", { name: "Anmeldung absenden" }).click();
   await expect(page.getByTestId("join-done")).toBeVisible();

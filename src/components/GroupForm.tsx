@@ -1,31 +1,27 @@
 "use client";
 
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { Badge, Button, Field, Input, Notice, Segmented, Select, Textarea, cx } from "./ui";
-import { MultiDayCalendar, RangeCalendar } from "./TripCalendar";
-import { SkiRangeQuickPick, type FormTrip } from "./ParticipantForm";
-import { eachDay, formatLong, formatShort, isWithin, type ISODate } from "@/lib/dates";
-import { DIET_LABELS, type Approval, type Diet, type MealMode, type Participant, type SkiNeed, type StayStatus } from "@/lib/types";
+import { Badge, Button, Field, Input, Notice, Segmented, Select, cx } from "./ui";
+import { RangeCalendar } from "./TripCalendar";
+import type { FormTrip } from "./ParticipantForm";
+import { addDays, eachDay, formatLong, formatShort, type ISODate } from "@/lib/dates";
+import { formTexts } from "@/lib/formTexts";
+import { PHONE_DEFAULT, formatGermanDate, isPlausibleBirthDate, isValidEmail, isValidPhone, parseGermanDate } from "@/lib/person";
+import { DIET_LABELS, SELF_DIETS, type Approval, type Diet, type Participant } from "@/lib/types";
 
 /**
  * Anmeldeformular für eine oder mehrere Personen (z. B. Familie).
- * Aufenthalt, Skipass und Essen werden im "Kopf" einmal für alle gewählt;
- * pro Person kann man davon abweichen. Name, Passkategorie, Ernährung und Allergien
- * sind immer pro Person.
+ * Aufenthalt und Skipass werden im "Kopf" einmal für alle gewählt; pro Person kann man abweichen.
+ * Name, Kontakt, Geburtstag, Passkategorie, Ernährung und Allergien sind immer pro Person.
+ * Essen: alle Anwesenden werden eingeplant (keine Abfrage mehr).
  */
 
 export interface Shared {
   arrival_date: ISODate | null;
-  arrival_time: string;
   departure_date: ISODate | null;
-  departure_time: string;
-  stay_status: StayStatus;
-  ski_need: SkiNeed;
-  ski_days: ISODate[];
-  ski_discount: string;
-  share_ski_public: boolean;
-  meal_mode: MealMode;
-  meal_days: ISODate[];
+  ski_need: "yes" | "no" | "unknown";
+  ski_from: ISODate | null;
+  ski_to: ISODate | null;
 }
 
 export interface PersonState {
@@ -34,18 +30,20 @@ export interface PersonState {
   approval?: Approval;
   first_name: string;
   last_name: string;
+  phone: string;
+  email: string;
+  birth_text: string; // TT.MM.JJJJ
   status: "active" | "withdrawn";
   ski_category: string;
   diet: Diet | "";
-  food_wishes: string;
   allergies: string;
-  own: { stay: boolean; ski: boolean; meal: boolean };
+  own: { stay: boolean; ski: boolean };
   mine: Shared;
 }
 
 export interface GroupState {
-  contact: string;
-  comment: string;
+  contact: string | null;
+  comment: string | null;
   head: Shared;
   persons: PersonState[];
 }
@@ -54,71 +52,55 @@ let keySeq = 0;
 const newKey = () => `p${Date.now().toString(36)}${(keySeq++).toString(36)}`;
 
 export function emptyShared(): Shared {
-  return {
-    arrival_date: null,
-    arrival_time: "",
-    departure_date: null,
-    departure_time: "",
-    stay_status: "confirmed",
-    ski_need: "unknown",
-    ski_days: [],
-    ski_discount: "",
-    share_ski_public: false,
-    meal_mode: "all_present",
-    meal_days: [],
-  };
+  return { arrival_date: null, departure_date: null, ski_need: "unknown", ski_from: null, ski_to: null };
 }
 
-export function emptyPerson(head?: Shared): PersonState {
+export function emptyPerson(head?: Shared, lastName = ""): PersonState {
   return {
     key: newKey(),
     first_name: "",
-    last_name: "",
+    last_name: lastName,
+    phone: PHONE_DEFAULT,
+    email: "",
+    birth_text: "",
     status: "active",
     ski_category: "",
     diet: "",
-    food_wishes: "",
     allergies: "",
-    own: { stay: false, ski: false, meal: false },
-    mine: structuredClone(head ?? emptyShared()),
+    own: { stay: false, ski: false },
+    mine: { ...(head ?? emptyShared()) },
   };
 }
 
 export function emptyGroup(): GroupState {
-  return { contact: "", comment: "", head: emptyShared(), persons: [emptyPerson()] };
+  return { contact: null, comment: null, head: emptyShared(), persons: [emptyPerson()] };
 }
 
 type P = Omit<Participant, "org_note">;
 
 function sharedOf(p: P): Shared {
+  const days = p.ski_days ?? [];
   return {
     arrival_date: p.arrival_date,
-    arrival_time: p.arrival_time ?? "",
     departure_date: p.departure_date,
-    departure_time: p.departure_time ?? "",
-    stay_status: p.stay_status,
     ski_need: p.ski_need,
-    ski_days: p.ski_days ?? [],
-    ski_discount: p.ski_discount ?? "",
-    share_ski_public: p.share_ski_public,
-    meal_mode: p.meal_mode,
-    meal_days: p.meal_days ?? [],
+    ski_from: days[0] ?? null,
+    ski_to: days[days.length - 1] ?? null,
   };
 }
 
-const STAY_KEYS = ["arrival_date", "arrival_time", "departure_date", "departure_time", "stay_status"] as const;
-const SKI_KEYS = ["ski_need", "ski_days", "ski_discount", "share_ski_public"] as const;
-const MEAL_KEYS = ["meal_mode", "meal_days"] as const;
-const same = (a: Shared, b: Shared, keys: readonly (keyof Shared)[]) => keys.every((k) => JSON.stringify(a[k]) === JSON.stringify(b[k]));
+const STAY_KEYS = ["arrival_date", "departure_date"] as const;
+const SKI_KEYS = ["ski_need", "ski_from", "ski_to"] as const;
+const same = (a: Shared, b: Shared, keys: readonly (keyof Shared)[]) => keys.every((k) => a[k] === b[k]);
 
-/** Baut den Formularzustand aus gespeicherten Personen: Kopf = erste aktive Person, Abweichungen werden markiert. */
+/** Formularzustand aus gespeicherten Personen: Kopf = erste aktive Person, Abweichungen werden markiert. */
 export function groupFromParticipants(ps: P[], reg: { contact: string | null; comment: string | null }): GroupState {
   const sorted = [...ps].sort((a, b) => a.position - b.position);
   const ref = sorted.find((p) => p.status === "active") ?? sorted[0];
   const head = ref ? sharedOf(ref) : emptyShared();
   return {
-    contact: reg.contact ?? "",
-    comment: reg.comment ?? "",
+    contact: reg.contact,
+    comment: reg.comment,
     head,
     persons: sorted.map((p) => {
       const mine = sharedOf(p);
@@ -128,12 +110,14 @@ export function groupFromParticipants(ps: P[], reg: { contact: string | null; co
         approval: p.approval,
         first_name: p.first_name,
         last_name: p.last_name,
+        phone: p.phone ?? PHONE_DEFAULT,
+        email: p.email ?? "",
+        birth_text: formatGermanDate(p.birth_date),
         status: p.status,
         ski_category: p.ski_category ?? "",
-        diet: p.diet ?? "",
-        food_wishes: p.food_wishes ?? "",
+        diet: p.diet && SELF_DIETS.includes(p.diet) ? p.diet : "",
         allergies: p.allergies ?? "",
-        own: { stay: !same(mine, head, STAY_KEYS), ski: !same(mine, head, SKI_KEYS), meal: !same(mine, head, MEAL_KEYS) },
+        own: { stay: !same(mine, head, STAY_KEYS), ski: !same(mine, head, SKI_KEYS) },
         mine,
       };
     }),
@@ -142,43 +126,57 @@ export function groupFromParticipants(ps: P[], reg: { contact: string | null; co
 
 /** Effektive Werte einer Person (Kopf oder eigene Abweichung). */
 export function effective(g: GroupState, p: PersonState): Shared {
-  const pick = (own: boolean, keys: readonly (keyof Shared)[]) => Object.fromEntries(keys.map((k) => [k, (own ? p.mine : g.head)[k]]));
-  return { ...pick(p.own.stay, STAY_KEYS), ...pick(p.own.ski, SKI_KEYS), ...pick(p.own.meal, MEAL_KEYS) } as unknown as Shared;
+  const stay = p.own.stay ? p.mine : g.head;
+  const ski = p.own.ski ? p.mine : g.head;
+  return { arrival_date: stay.arrival_date, departure_date: stay.departure_date, ski_need: ski.ski_need, ski_from: ski.ski_from, ski_to: ski.ski_to };
 }
 
-export function groupToPayload(g: GroupState) {
+/** Frühester/spätester möglicher Skitag: frühestens 2. Reisetag und Anreise, spätestens Abreise. */
+export function skiBounds(trip: { start_date: ISODate; end_date: ISODate }, s: Pick<Shared, "arrival_date" | "departure_date">) {
+  const second = addDays(trip.start_date, 1);
+  const min = s.arrival_date && s.arrival_date > second ? s.arrival_date : second;
+  const max = s.departure_date ?? trip.end_date;
+  return { min, max };
+}
+
+/** Skitage einer Person: gewählter Zeitraum, auf ihren Aufenthalt zugeschnitten. */
+export function skiDaysFor(trip: { start_date: ISODate; end_date: ISODate }, e: Shared): ISODate[] {
+  if (e.ski_need !== "yes" || !e.ski_from || !e.ski_to) return [];
+  const { min, max } = skiBounds(trip, e);
+  const from = e.ski_from < min ? min : e.ski_from;
+  const to = e.ski_to > max ? max : e.ski_to;
+  return eachDay(from, to);
+}
+
+export function groupToPayload(g: GroupState, trip: { start_date: ISODate; end_date: ISODate; ski_enabled?: boolean }) {
   return {
-    contact: g.contact || null,
-    comment: g.comment || null,
+    contact: g.contact,
+    comment: g.comment,
     persons: g.persons.map((p) => {
       const e = effective(g, p);
+      const skiDays = skiDaysFor(trip, e);
       return {
         ...(p.id ? { id: p.id } : {}),
-        first_name: p.first_name,
-        last_name: p.last_name,
+        first_name: p.first_name.trim(),
+        last_name: p.last_name.trim(),
+        phone: p.phone,
+        email: p.email.trim(),
+        birth_date: parseGermanDate(p.birth_text),
         status: p.status,
         arrival_date: e.arrival_date,
-        arrival_time: e.arrival_time || null,
         departure_date: e.departure_date,
-        departure_time: e.departure_time || null,
-        stay_status: e.stay_status,
-        ski_need: e.ski_need,
-        ski_days: e.ski_need === "no" ? [] : e.ski_days,
-        ski_category: e.ski_need === "no" ? null : p.ski_category || null,
-        ski_discount: e.ski_need === "no" ? null : e.ski_discount || null,
-        share_ski_public: e.share_ski_public,
-        meal_mode: e.meal_mode,
-        meal_days: e.meal_mode === "custom" ? e.meal_days : [],
-        diet: p.diet || null,
-        food_wishes: p.food_wishes || null,
-        allergies: p.allergies || null,
+        ski_need: trip.ski_enabled === false ? "no" : e.ski_need === "unknown" ? undefined : e.ski_need,
+        ski_days: e.ski_need === "yes" ? skiDays : [],
+        ski_category: e.ski_need === "yes" ? p.ski_category || null : null,
+        share_ski_public: false,
+        diet: p.diet || undefined,
+        allergies: p.allergies.trim() || null,
       };
     }),
   };
 }
 
 type StepId = "persons" | "stay" | "ski" | "food" | "review";
-const STEP_LABELS: Record<StepId, string> = { persons: "Personen", stay: "Aufenthalt", ski: "Skipass", food: "Essen", review: "Prüfen" };
 
 interface Props {
   trip: FormTrip;
@@ -194,45 +192,87 @@ interface Props {
 export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverError, busy, footer }: Props) {
   const [g, setG] = useState<GroupState>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const T = useMemo(() => formTexts(trip.form_texts), [trip.form_texts]);
+  const STEP_LABELS: Record<StepId, string> = { persons: T.persons_title, stay: T.stay_title, ski: T.ski_title, food: T.food_title, review: T.review_title };
   const steps: StepId[] = useMemo(() => ["persons", "stay", ...(trip.ski_enabled ? (["ski"] as StepId[]) : []), "food", "review"], [trip.ski_enabled]);
   const [stepIdx, setStepIdx] = useState(0);
   const current = steps[stepIdx];
   const multi = g.persons.length > 1;
+  const hasCats = trip.ski_categories.length > 0;
 
-  const setHead = (patch: Partial<Shared>) => setG((x) => ({ ...x, head: { ...x.head, ...patch } }));
-  const setPerson = (key: string, patch: Partial<PersonState>) => setG((x) => ({ ...x, persons: x.persons.map((p) => (p.key === key ? { ...p, ...patch } : p)) }));
-  const setMine = (key: string, patch: Partial<Shared>) => setG((x) => ({ ...x, persons: x.persons.map((p) => (p.key === key ? { ...p, mine: { ...p.mine, ...patch } } : p)) }));
-  const toggleOwn = (key: string, area: "stay" | "ski" | "meal", on: boolean) =>
+  const clearErr = (prefix: string) => setErrors((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !k.startsWith(prefix))));
+  const setHead = (patch: Partial<Shared>) => {
+    setG((x) => ({ ...x, head: { ...x.head, ...patch } }));
+    clearErr("head");
+  };
+  const setPerson = (key: string, patch: Partial<PersonState>) => {
+    setG((x) => ({ ...x, persons: x.persons.map((p) => (p.key === key ? { ...p, ...patch } : p)) }));
+    clearErr(key);
+  };
+  const setMine = (key: string, patch: Partial<Shared>) => {
+    setG((x) => ({ ...x, persons: x.persons.map((p) => (p.key === key ? { ...p, mine: { ...p.mine, ...patch } } : p)) }));
+    clearErr(key);
+  };
+  const toggleOwn = (key: string, area: "stay" | "ski", on: boolean) =>
     setG((x) => ({
       ...x,
       // Beim Einschalten nur die Felder dieses Bereichs aus dem Kopf übernehmen – andere Abweichungen bleiben erhalten
       persons: x.persons.map((p) => {
         if (p.key !== key) return p;
-        const keys = area === "stay" ? STAY_KEYS : area === "ski" ? SKI_KEYS : MEAL_KEYS;
-        const copied = on ? Object.fromEntries(keys.map((k) => [k, structuredClone(x.head[k])])) : {};
+        const keys = area === "stay" ? STAY_KEYS : SKI_KEYS;
+        const copied = on ? Object.fromEntries(keys.map((k) => [k, x.head[k]])) : {};
         return { ...p, own: { ...p.own, [area]: on }, mine: { ...p.mine, ...copied } };
       }),
     }));
 
+  const nameOf = (p: PersonState, i: number) => (p.first_name.trim() ? p.first_name.trim() : `Person ${i + 1}`);
+  const active = g.persons.filter((p) => p.status === "active");
+
   const validate = (only?: StepId): Record<string, string> => {
     const e: Record<string, string> = {};
-    if (!only || only === "persons") {
+    const check = (step: StepId) => !only || only === step;
+    if (check("persons")) {
       g.persons.forEach((p) => {
         if (!p.first_name.trim()) e[`${p.key}.first_name`] = "Vorname fehlt";
         if (!p.last_name.trim()) e[`${p.key}.last_name`] = "Nachname fehlt";
+        if (!isValidPhone(p.phone)) e[`${p.key}.phone`] = p.phone.replace(/[^\d]/g, "").length <= 2 ? "Handynummer fehlt" : "Bitte Handynummer prüfen, z. B. +49 170 1234567";
+        if (!p.email.trim()) e[`${p.key}.email`] = "E-Mail fehlt";
+        else if (!isValidEmail(p.email)) e[`${p.key}.email`] = "Bitte E-Mail-Adresse prüfen";
+        const bd = parseGermanDate(p.birth_text);
+        if (!p.birth_text.trim()) e[`${p.key}.birth`] = "Geburtstag fehlt";
+        else if (!bd || !isPlausibleBirthDate(bd)) e[`${p.key}.birth`] = "Bitte als TT.MM.JJJJ eingeben, z. B. 24.12.1995";
       });
     }
-    if (!only || only === "stay") {
-      const check = (s: Shared, k: string) => {
-        if (s.arrival_date && s.departure_date && s.departure_date < s.arrival_date) e[k] = "Abreise darf nicht vor der Anreise liegen.";
+    if (check("stay")) {
+      const chk = (s: Shared, k: string) => {
+        if (!s.arrival_date || !s.departure_date) e[k] = "Bitte Anreise und Abreise wählen.";
+        else if (s.departure_date < s.arrival_date) e[k] = "Abreise darf nicht vor der Anreise liegen.";
       };
-      check(g.head, "head.stay");
-      g.persons.forEach((p) => p.own.stay && check(p.mine, `${p.key}.stay`));
+      if (active.some((p) => !p.own.stay)) chk(g.head, "head.stay");
+      active.forEach((p) => p.own.stay && chk(p.mine, `${p.key}.stay`));
+    }
+    if (check("ski") && trip.ski_enabled) {
+      if (active.some((p) => !p.own.ski) && g.head.ski_need === "unknown") e["head.ski"] = "Bitte Ja oder Nein wählen.";
+      active.forEach((p, i) => {
+        const eff = effective(g, p);
+        if (p.own.ski && eff.ski_need === "unknown") e[`${p.key}.ski`] = "Bitte Ja oder Nein wählen.";
+        if (eff.ski_need !== "yes") return;
+        const src = p.own.ski ? `${p.key}.ski` : "head.ski";
+        if (!eff.ski_from || !eff.ski_to) e[src] = "Bitte ersten und letzten Skitag wählen.";
+        else if (!skiDaysFor(trip, eff).length) e[`${p.key}.ski`] = `Der Skizeitraum liegt außerhalb des Aufenthalts von ${nameOf(p, i)} – bitte für ${nameOf(p, i)} anpassen.`;
+        if (hasCats && !p.ski_category) e[`${p.key}.cat`] = "Bitte Passkategorie wählen";
+      });
+    }
+    if (check("food")) {
+      active.forEach((p) => {
+        if (!p.diet) e[`${p.key}.diet`] = "Bitte Ernährungsweise wählen";
+      });
     }
     return e;
   };
 
-  const firstErrorStep = (e: Record<string, string>): StepId => (Object.keys(e).some((k) => k.endsWith("name")) ? "persons" : "stay");
+  const stepOfError = (k: string): StepId =>
+    /first_name|last_name|phone|email|birth/.test(k) ? "persons" : k.endsWith(".stay") ? "stay" : /\.(ski|cat)$/.test(k) ? "ski" : "food";
 
   const next = () => {
     const e = validate(current);
@@ -248,27 +288,22 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
     const e = validate();
     setErrors(e);
     if (Object.keys(e).length) {
-      if (mode === "wizard") setStepIdx(steps.indexOf(firstErrorStep(e)));
+      if (mode === "wizard") setStepIdx(steps.indexOf(stepOfError(Object.keys(e)[0])));
       return;
     }
     await onSubmit(g);
   };
 
-  const nameOf = (p: PersonState, i: number) => (p.first_name.trim() ? p.first_name.trim() : `Person ${i + 1}`);
-
-  /* ---------- Abschnitte ---------- */
-
+  /* ---------- Schritt 1: Personen ---------- */
   const personsSection = (
     <div className="flex flex-col gap-4">
-      {mode === "wizard" && (
-        <p className="text-sm text-muted">Du kannst mehrere Personen auf einmal anmelden, z. B. deine Familie. Alle bekommen einen gemeinsamen Link zum Ändern.</p>
-      )}
+      {T.persons_intro && <p className="whitespace-pre-line text-sm text-muted">{T.persons_intro}</p>}
       <ul className="flex flex-col gap-3" data-testid="person-list">
         {g.persons.map((p, i) => (
           <li key={p.key} className={cx("rounded-xl border border-line bg-surface p-3", p.status === "withdrawn" && "opacity-70")} data-testid="person-entry">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="flex items-center gap-2 text-sm font-semibold">
-                {multi || mode === "full" ? `Person ${i + 1}` : "Deine Angaben"}
+              <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                {`${p.first_name} ${p.last_name}`.trim() || `Person ${i + 1}`}
                 {p.approval === "pending" && <Badge tone="warn">wartet auf Bestätigung</Badge>}
                 {p.approval === "approved" && p.status === "active" && <Badge tone="ok">bestätigt</Badge>}
                 {p.approval === "rejected" && <Badge tone="bad">abgelehnt</Badge>}
@@ -295,15 +330,29 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
               <Field label="Nachname" error={errors[`${p.key}.last_name`]}>
                 {(f) => <Input {...f} autoComplete={i === 0 ? "family-name" : "off"} value={p.last_name} onChange={(e) => setPerson(p.key, { last_name: e.target.value })} maxLength={60} />}
               </Field>
+              <Field label="Handynummer" error={errors[`${p.key}.phone`]}>
+                {(f) => <Input {...f} type="tel" inputMode="tel" autoComplete={i === 0 ? "tel" : "off"} value={p.phone} onChange={(e) => setPerson(p.key, { phone: e.target.value })} maxLength={40} />}
+              </Field>
+              <Field label="E-Mail" error={errors[`${p.key}.email`]}>
+                {(f) => <Input {...f} type="email" inputMode="email" autoComplete={i === 0 ? "email" : "off"} value={p.email} onChange={(e) => setPerson(p.key, { email: e.target.value })} maxLength={200} />}
+              </Field>
+              <Field label="Geburtstag" hint="TT.MM.JJJJ" error={errors[`${p.key}.birth`]}>
+                {(f) => (
+                  <Input
+                    {...f}
+                    inputMode="numeric"
+                    autoComplete={i === 0 ? "bday" : "off"}
+                    placeholder="z. B. 24.12.1995"
+                    value={p.birth_text}
+                    onChange={(e) => setPerson(p.key, { birth_text: autoDots(e.target.value, p.birth_text) })}
+                    maxLength={10}
+                  />
+                )}
+              </Field>
             </div>
             {mode === "full" && p.id && (
               <label className="mt-3 flex min-h-11 items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="size-5 accent-pine-600"
-                  checked={p.status === "withdrawn"}
-                  onChange={(e) => setPerson(p.key, { status: e.target.checked ? "withdrawn" : "active" })}
-                />
+                <input type="checkbox" className="size-5 accent-pine-600" checked={p.status === "withdrawn"} onChange={(e) => setPerson(p.key, { status: e.target.checked ? "withdrawn" : "active" })} />
                 {nameOf(p, i)} kommt doch nicht mit (Teilnahme zurückziehen)
               </label>
             )}
@@ -312,25 +361,15 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
       </ul>
       {g.persons.length < 12 && (
         <div>
-          <Button
-            type="button"
-            onClick={() =>
-              setG((x) => ({ ...x, persons: [...x.persons, { ...emptyPerson(x.head), last_name: x.persons[0]?.last_name ?? "" }] }))
-            }
-          >
+          <Button type="button" onClick={() => setG((x) => ({ ...x, persons: [...x.persons, emptyPerson(x.head, x.persons[0]?.last_name ?? "")] }))}>
             + Weitere Person anmelden
           </Button>
         </div>
       )}
-      <Field label="Kontakt" optional hint="Telefon oder E-Mail – nur für die Organisatoren sichtbar.">
-        {(f) => <Input {...f} autoComplete="tel" value={g.contact} onChange={(e) => setG({ ...g, contact: e.target.value })} maxLength={200} />}
-      </Field>
-      <Field label="Nachricht an die Organisatoren" optional hint="Nicht öffentlich sichtbar.">
-        {(f) => <Textarea {...f} value={g.comment} onChange={(e) => setG({ ...g, comment: e.target.value })} maxLength={2000} />}
-      </Field>
     </div>
   );
 
+  /* ---------- Schritt 2: Aufenthalt ---------- */
   const stayEditor = (s: Shared, set: (patch: Partial<Shared>) => void, label: string, errKey: string) => (
     <div className="flex flex-col gap-3">
       <RangeCalendar label={label} start={trip.start_date} end={trip.end_date} from={s.arrival_date} to={s.departure_date} onChange={(a, d) => set({ arrival_date: a, departure_date: d })} />
@@ -353,41 +392,19 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
           {errors[errKey]}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Ankunftszeit" optional>
-          {(f) => <Input {...f} type="time" value={s.arrival_time} onChange={(e) => set({ arrival_time: e.target.value })} />}
-        </Field>
-        <Field label="Abfahrtszeit" optional>
-          {(f) => <Input {...f} type="time" value={s.departure_time} onChange={(e) => set({ departure_time: e.target.value })} />}
-        </Field>
-      </div>
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">Wie sicher sind diese Angaben?</span>
-        <Segmented
-          label="Status der Angaben"
-          value={s.stay_status}
-          onChange={(v) => set({ stay_status: v })}
-          options={[
-            { value: "confirmed", label: "Bestätigt" },
-            { value: "tentative", label: "Noch unklar" },
-          ]}
-        />
-      </div>
     </div>
   );
 
-  const stayDaysOf = (s: Shared) => (s.arrival_date && s.departure_date && s.arrival_date <= s.departure_date ? eachDay(s.arrival_date, s.departure_date) : []);
-
-  const stayHeadLabel = multi ? "Gemeinsame Anreise und Abreise für alle" : "Anreise und Abreise wählen";
   const staySection = (
     <div className="flex flex-col gap-4">
+      {T.stay_intro && <p className="whitespace-pre-line text-sm text-muted">{T.stay_intro}</p>}
       {multi && <HeadTitle>Für alle gemeinsam</HeadTitle>}
-      {stayEditor(g.head, setHead, stayHeadLabel, "head.stay")}
+      {stayEditor(g.head, setHead, multi ? "Gemeinsame Anreise und Abreise für alle" : "Anreise und Abreise wählen", "head.stay")}
       {multi && (
         <div className="flex flex-col gap-3">
-          <span className="text-sm font-medium">Kommt jemand später oder fährt früher?</span>
+          <span className="text-sm font-medium">{T.stay_differs}</span>
           {g.persons.map((p, i) => (
-            <Deviation key={p.key} area="stay" checked={p.own.stay} onToggle={(on) => toggleOwn(p.key, "stay", on)} title={`${nameOf(p, i)}: andere Daten`}>
+            <Deviation key={p.key} area="stay" checked={p.own.stay} onToggle={(on) => toggleOwn(p.key, "stay", on)} title={`${nameOf(p, i)} reist anders an oder ab`}>
               {stayEditor(p.mine, (patch) => setMine(p.key, patch), `Anreise und Abreise für ${nameOf(p, i)}`, `${p.key}.stay`)}
             </Deviation>
           ))}
@@ -396,56 +413,51 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
     </div>
   );
 
-  const skiEditor = (s: Shared, set: (patch: Partial<Shared>) => void, stay: Shared, label: string) => {
-    const days = stayDaysOf(stay);
+  /* ---------- Schritt 3: Skipass ---------- */
+  const skiEditor = (s: Shared, set: (patch: Partial<Shared>) => void, stay: Pick<Shared, "arrival_date" | "departure_date">, label: string, errKey: string) => {
+    const { min, max } = skiBounds(trip, stay);
     return (
       <div className="flex flex-col gap-3">
         <Segmented
           label={label}
-          value={s.ski_need}
+          value={s.ski_need === "unknown" ? ("" as "yes") : s.ski_need}
           onChange={(v) => set({ ski_need: v })}
           options={[
             { value: "yes", label: "Ja" },
             { value: "no", label: "Nein" },
-            { value: "unknown", label: "Weiß noch nicht" },
           ]}
         />
-        {s.ski_need !== "no" && (
+        {s.ski_need === "yes" && (
           <>
-            <span className="text-sm font-medium">An welchen Tagen?</span>
-            <div className="flex flex-wrap gap-2">
-              {days.length > 0 && (
-                <Button type="button" size="sm" onClick={() => set({ ski_days: days })}>
-                  Alle Aufenthaltstage
-                </Button>
-              )}
-              {days.length > 2 && (
-                <Button type="button" size="sm" onClick={() => set({ ski_days: days.slice(1, -1) })}>
-                  Ohne An- und Abreisetag
-                </Button>
-              )}
-              {s.ski_days.length > 0 && (
-                <Button type="button" size="sm" variant="ghost" onClick={() => set({ ski_days: [] })}>
-                  Keine
+            <RangeCalendar
+              label={`${label}: Skitage`}
+              start={trip.start_date}
+              end={trip.end_date}
+              from={s.ski_from}
+              to={s.ski_to}
+              min={min}
+              max={max}
+              words={{ from: "ersten Skitags", to: "letzten Skitags", fromShort: "1.", toShort: "Ende" }}
+              onChange={(a, b) => set({ ski_from: a, ski_to: b })}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              {min <= max && (
+                <Button type="button" size="sm" onClick={() => set({ ski_from: min, ski_to: max })}>
+                  Ganzer möglicher Zeitraum ({formatShort(min)} – {formatShort(max)})
                 </Button>
               )}
             </div>
-            <SkiRangeQuickPick trip={trip} onApply={(d) => set({ ski_days: d })} />
-            <MultiDayCalendar label={`${label}: Skitage`} start={trip.start_date} end={trip.end_date} value={s.ski_days} onChange={(d) => set({ ski_days: d })} context={{ from: stay.arrival_date, to: stay.departure_date }} />
             <p className="text-sm text-muted" aria-live="polite" data-testid="ski-day-count">
-              {s.ski_days.length ? `${s.ski_days.length} Skitag${s.ski_days.length === 1 ? "" : "e"}: ${s.ski_days.map(formatShort).join(", ")}` : "Noch keine Skitage gewählt."}
+              {s.ski_from && s.ski_to
+                ? `Skipass von ${formatShort(s.ski_from)} bis ${formatShort(s.ski_to)} (${eachDay(s.ski_from, s.ski_to).length} Tage)`
+                : "Noch kein Skizeitraum gewählt."}
             </p>
-            {days.length > 0 && s.ski_days.some((d) => !isWithin(d, stay.arrival_date!, stay.departure_date!)) && (
-              <Notice tone="warn">Mindestens ein Skitag liegt außerhalb des Aufenthalts.</Notice>
-            )}
-            <Field label="Ermäßigung" optional hint="z. B. Studierendenausweis, Saisonkarte vorhanden">
-              {(f) => <Input {...f} value={s.ski_discount} onChange={(e) => set({ ski_discount: e.target.value })} maxLength={200} />}
-            </Field>
-            <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm">
-              <input type="checkbox" className="mt-0.5 size-5 accent-pine-600" checked={s.share_ski_public} onChange={(e) => set({ share_ski_public: e.target.checked })} />
-              <span>Skitage in der gemeinsamen Übersicht zeigen (damit andere sich anschließen können).</span>
-            </label>
           </>
+        )}
+        {errors[errKey] && (
+          <p role="alert" className="text-sm font-medium text-danger">
+            {errors[errKey]}
+          </p>
         )}
       </div>
     );
@@ -453,18 +465,36 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
 
   const skiSection = (
     <div className="flex flex-col gap-4">
+      {T.ski_intro && <Notice>{T.ski_intro}</Notice>}
       {trip.ski_notes && <Notice>{trip.ski_notes}</Notice>}
       {multi && <HeadTitle>Für alle gemeinsam</HeadTitle>}
-      <span className="text-sm font-medium">{multi ? "Braucht ihr Skipässe?" : "Brauchst du einen Skipass?"}</span>
-      {skiEditor(g.head, setHead, g.head, "Skipass erforderlich")}
-      {trip.ski_categories.length > 0 && (
+      <span className="text-sm font-medium">{T.ski_question}</span>
+      {skiEditor(g.head, setHead, g.head, "Skipass erforderlich", "head.ski")}
+      {multi && (
+        <div className="flex flex-col gap-3">
+          <span className="text-sm font-medium">{T.ski_differs}</span>
+          {g.persons.map((p, i) => (
+            <Deviation key={p.key} area="ski" checked={p.own.ski} onToggle={(on) => toggleOwn(p.key, "ski", on)} title={`Für ${nameOf(p, i)} anders`}>
+              {skiEditor(p.mine, (patch) => setMine(p.key, patch), effective(g, p), `Skipass für ${nameOf(p, i)}`, `${p.key}.ski`)}
+            </Deviation>
+          ))}
+          {g.persons.map((p) => (!p.own.ski && errors[`${p.key}.ski`] ? <p key={p.key} role="alert" className="text-sm font-medium text-danger">{errors[`${p.key}.ski`]}</p> : null))}
+        </div>
+      )}
+      {!multi && g.persons[0] && errors[`${g.persons[0].key}.ski`] && (
+        <p role="alert" className="text-sm font-medium text-danger">
+          {errors[`${g.persons[0].key}.ski`]}
+        </p>
+      )}
+      {hasCats && active.some((p) => effective(g, p).ski_need === "yes") && (
         <div className="flex flex-col gap-3">
           <span className="text-sm font-medium">{multi ? "Passkategorie pro Person" : "Passkategorie"}</span>
           {g.persons.map((p, i) => {
             const e = effective(g, p);
-            if (e.ski_need === "no") return null;
+            if (e.ski_need !== "yes" || p.status === "withdrawn") return null;
+            const bd = parseGermanDate(p.birth_text);
             return (
-              <Field key={p.key} label={multi ? nameOf(p, i) : "Passkategorie"} optional={e.ski_need === "unknown"}>
+              <Field key={p.key} label={multi ? nameOf(p, i) : "Passkategorie"} hint={bd ? `Geburtsjahr ${bd.slice(0, 4)}` : undefined} error={errors[`${p.key}.cat`]}>
                 {(f) => (
                   <Select {...f} value={p.ski_category} onChange={(ev) => setPerson(p.key, { ski_category: ev.target.value })}>
                     <option value="">Bitte wählen …</option>
@@ -481,91 +511,46 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
           })}
         </div>
       )}
-      {multi && (
-        <div className="flex flex-col gap-3">
-          <span className="text-sm font-medium">Fährt jemand nicht oder an anderen Tagen?</span>
-          {g.persons.map((p, i) => (
-            <Deviation key={p.key} area="ski" checked={p.own.ski} onToggle={(on) => toggleOwn(p.key, "ski", on)} title={`${nameOf(p, i)}: anderer Skipass-Wunsch`}>
-              {skiEditor(p.mine, (patch) => setMine(p.key, patch), effective(g, p), `Skipass für ${nameOf(p, i)}`)}
-            </Deviation>
-          ))}
-        </div>
-      )}
     </div>
   );
 
-  const mealEditor = (s: Shared, set: (patch: Partial<Shared>) => void, stay: Shared, label: string) => (
-    <div className="flex flex-col gap-3">
-      <Segmented
-        label={label}
-        value={s.meal_mode}
-        onChange={(v) => set({ meal_mode: v })}
-        options={[
-          { value: "all_present", label: "Ja, an allen Tagen vor Ort" },
-          { value: "custom", label: "Nur an bestimmten Tagen" },
-          { value: "none", label: "Nein" },
-          { value: "unknown", label: "Weiß noch nicht" },
-        ]}
-      />
-      {s.meal_mode === "custom" && (
-        <MultiDayCalendar label={`${label}: Essenstage`} start={trip.start_date} end={trip.end_date} value={s.meal_days} onChange={(d) => set({ meal_days: d })} context={{ from: stay.arrival_date, to: stay.departure_date }} />
-      )}
-    </div>
-  );
-
+  /* ---------- Schritt 4: Essen ---------- */
   const foodSection = (
     <div className="flex flex-col gap-4">
-      {multi && <HeadTitle>Für alle gemeinsam</HeadTitle>}
-      <span className="text-sm font-medium">{multi ? "Esst ihr bei den gemeinsamen Mahlzeiten mit?" : "Isst du bei den gemeinsamen Mahlzeiten mit?"}</span>
-      {mealEditor(g.head, setHead, g.head, "Teilnahme an gemeinsamen Mahlzeiten")}
-      {multi && (
-        <div className="flex flex-col gap-3">
-          <span className="text-sm font-medium">Isst jemand anders mit?</span>
-          {g.persons.map((p, i) => (
-            <Deviation key={p.key} area="meal" checked={p.own.meal} onToggle={(on) => toggleOwn(p.key, "meal", on)} title={`${nameOf(p, i)}: andere Essenstage`}>
-              {mealEditor(p.mine, (patch) => setMine(p.key, patch), effective(g, p), `Essen für ${nameOf(p, i)}`)}
-            </Deviation>
-          ))}
-        </div>
-      )}
-      <div className="flex flex-col gap-3">
-        {multi && <span className="text-sm font-medium">Ernährung pro Person</span>}
-        {g.persons.map((p, i) => {
-          const e = effective(g, p);
-          return (
-            <div key={p.key} className={cx("flex flex-col gap-3", multi && "rounded-xl border border-line bg-surface p-3")}>
-              {multi && <span className="text-sm font-semibold">{nameOf(p, i)}</span>}
-              {e.meal_mode !== "none" && (
-                <Field label="Ernährungsweise">
-                  {(f) => (
-                    <Select {...f} value={p.diet} onChange={(ev) => setPerson(p.key, { diet: ev.target.value as Diet | "" })}>
-                      <option value="">Bitte wählen …</option>
-                      {Object.entries(DIET_LABELS).map(([k, v]) => (
-                        <option key={k} value={k}>
-                          {v}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </Field>
+      {T.food_intro && <p className="whitespace-pre-line text-sm text-muted">{T.food_intro}</p>}
+      {g.persons.map((p, i) =>
+        p.status === "withdrawn" ? null : (
+          <div key={p.key} className={cx("flex flex-col gap-3", multi && "rounded-xl border border-line bg-surface p-3")}>
+            {multi && <span className="text-sm font-semibold">{nameOf(p, i)}</span>}
+            <Field label="Ernährungsweise" error={errors[`${p.key}.diet`]}>
+              {(f) => (
+                <Select {...f} value={p.diet} onChange={(ev) => setPerson(p.key, { diet: ev.target.value as Diet | "" })}>
+                  <option value="">Bitte wählen …</option>
+                  {SELF_DIETS.map((k) => (
+                    <option key={k} value={k}>
+                      {DIET_LABELS[k]}
+                    </option>
+                  ))}
+                </Select>
               )}
-              <Field label="Essenswünsche" optional>
-                {(f) => <Input {...f} value={p.food_wishes} onChange={(ev) => setPerson(p.key, { food_wishes: ev.target.value })} maxLength={1000} />}
-              </Field>
-              <Field label="Allergien oder Unverträglichkeiten" optional hint={i === 0 ? "Nur angeben, was fürs Kochen wichtig ist. Sehen ausschließlich die Organisatoren." : undefined}>
-                {(f) => <Input {...f} value={p.allergies} onChange={(ev) => setPerson(p.key, { allergies: ev.target.value })} maxLength={1000} />}
-              </Field>
-            </div>
-          );
-        })}
-      </div>
+            </Field>
+            {p.diet === "vegan" && T.vegan_hint && <Notice tone="warn">{T.vegan_hint}</Notice>}
+            <Field label="Allergien oder Unverträglichkeiten" optional hint={i === 0 ? "Sehen ausschließlich die Organisatoren." : undefined}>
+              {(f) => <Input {...f} value={p.allergies} onChange={(ev) => setPerson(p.key, { allergies: ev.target.value })} maxLength={1000} />}
+            </Field>
+          </div>
+        )
+      )}
     </div>
   );
 
+  /* ---------- Schritt 5: Prüfen ---------- */
   const review = (
     <div className="flex flex-col gap-3" data-testid="review">
+      {T.review_intro && <p className="whitespace-pre-line text-sm text-muted">{T.review_intro}</p>}
       {g.persons.map((p, i) => {
         const e = effective(g, p);
+        const days = skiDaysFor(trip, e);
         const cat = trip.ski_categories.find((c) => c.id === p.ski_category)?.name;
         return (
           <dl key={p.key} className="rounded-xl border border-line bg-surface p-4 text-sm">
@@ -574,33 +559,37 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
               {p.status === "withdrawn" && <span className="ml-2 text-sm font-normal text-muted">(zurückgezogen)</span>}
             </dt>
             <dd className="flex flex-col gap-1">
+              <span className="text-muted">
+                {p.phone} · {p.email} · geb. {p.birth_text}
+              </span>
               <span>
                 {e.arrival_date ? formatLong(e.arrival_date) : "Anreise offen"} – {e.departure_date ? formatLong(e.departure_date) : "Abreise offen"}
-                {e.stay_status === "tentative" && <span className="text-amber-ink"> (noch unklar)</span>}
               </span>
               {trip.ski_enabled && (
                 <span className="text-muted">
-                  Skipass: {e.ski_need === "no" ? "nein" : `${e.ski_need === "yes" ? "ja" : "unklar"}${e.ski_days.length ? `, ${e.ski_days.length} Tage` : ""}${cat ? `, ${cat}` : ""}`}
+                  Skipass: {e.ski_need === "yes" ? (days.length ? `${formatShort(days[0])} – ${formatShort(days[days.length - 1])} (${days.length} Tage)` : "Zeitraum fehlt") : "nein"}
+                  {e.ski_need === "yes" && cat ? `, ${cat}` : ""}
                 </span>
               )}
               <span className="text-muted">
-                Essen: {{ all_present: "an allen Tagen vor Ort", custom: `an ${e.meal_days.length} Tagen`, none: "nein", unknown: "unklar" }[e.meal_mode]}
-                {p.diet ? `, ${DIET_LABELS[p.diet]}` : ""}
-                {p.allergies ? ", Allergien angegeben" : ""}
+                Essen: {p.diet ? DIET_LABELS[p.diet] : "–"}
+                {p.allergies ? `, Allergien: ${p.allergies}` : ""}
               </span>
             </dd>
           </dl>
         );
       })}
-      <div className="flex flex-wrap gap-2">
-        {steps
-          .filter((s) => s !== "review")
-          .map((s) => (
-            <Button key={s} type="button" size="sm" variant="ghost" onClick={() => setStepIdx(steps.indexOf(s))}>
-              {STEP_LABELS[s]} ändern
-            </Button>
-          ))}
-      </div>
+      {mode === "wizard" && (
+        <div className="flex flex-wrap gap-2">
+          {steps
+            .filter((s) => s !== "review")
+            .map((s) => (
+              <Button key={s} type="button" size="sm" variant="ghost" onClick={() => setStepIdx(steps.indexOf(s))}>
+                {STEP_LABELS[s]} ändern
+              </Button>
+            ))}
+        </div>
+      )}
     </div>
   );
 
@@ -612,7 +601,7 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
         {steps
           .filter((s) => s !== "review")
           .map((s) => (
-            <section key={s} className="rounded-xl border border-line bg-canvas/40 p-4 sm:bg-surface">
+            <section key={s} className="rounded-xl border border-line bg-surface p-4">
               <h2 className="mb-4 text-base font-semibold">{STEP_LABELS[s]}</h2>
               {sections[s]}
             </section>
@@ -637,9 +626,9 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
     <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
       <ol className="flex gap-1" aria-label="Fortschritt">
         {steps.map((s, i) => (
-          <li key={s} className="flex flex-1 flex-col gap-1">
+          <li key={s} className="flex min-w-0 flex-1 flex-col gap-1">
             <span className={cx("h-1.5 rounded-full", i <= stepIdx ? "bg-pine-500" : "bg-line")} />
-            <span className={cx("text-[11px]", i === stepIdx ? "font-semibold text-ink" : "text-faint")} aria-current={i === stepIdx ? "step" : undefined}>
+            <span className={cx("truncate text-[11px]", i === stepIdx ? "font-semibold text-ink" : "text-faint")} aria-current={i === stepIdx ? "step" : undefined}>
               {STEP_LABELS[s]}
             </span>
           </li>
@@ -668,9 +657,23 @@ export function GroupForm({ trip, initial, mode, submitLabel, onSubmit, serverEr
   );
 }
 
+/** Setzt beim Tippen automatisch Punkte: "24121995" → "24.12.1995". Löschen bleibt möglich. */
+function autoDots(next: string, prev: string): string {
+  if (next.length < prev.length) return next;
+  const raw = next.replace(/[^\d.]/g, "");
+  // Eigene Schreibweise (z. B. "1.2.1990") nicht verändern
+  const manual = [...raw].some((c, i) => c === "." && i !== 2 && i !== 5);
+  if (manual) return raw.slice(0, 10);
+  if (raw.endsWith(".") && (raw.length === 3 || raw.length === 6)) return raw;
+  const digits = next.replace(/[^\d]/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
+}
+
 function Deviation({ area, checked, onToggle, title, children }: { area: string; checked: boolean; onToggle: (on: boolean) => void; title: string; children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-line bg-surface p-3" data-testid={`own-${area}`}>
+    <div className={cx("rounded-xl border bg-surface p-3", checked ? "border-pine-200" : "border-line")} data-testid={`own-${area}`}>
       <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-medium">
         <input type="checkbox" className="size-5 accent-pine-600" checked={checked} onChange={(e) => onToggle(e.target.checked)} />
         {title}

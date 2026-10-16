@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Button, Field, Input, Notice, Segmented, Select, Textarea, cx } from "./ui";
 import { MultiDayCalendar, RangeCalendar } from "./TripCalendar";
 import { eachDay, formatLong, formatShort, isWithin, type ISODate } from "@/lib/dates";
+import { formatGermanDate, parseGermanDate } from "@/lib/person";
 import { DIET_LABELS, type Diet, type MealMode, type Participant, type SkiCategory, type SkiNeed, type StayStatus } from "@/lib/types";
 
 export interface FormTrip {
@@ -13,11 +14,15 @@ export interface FormTrip {
   ski_enabled: boolean;
   ski_categories: SkiCategory[];
   ski_notes?: string | null;
+  form_texts?: Record<string, string>;
 }
 
 export interface FormState {
   first_name: string;
   last_name: string;
+  phone: string;
+  email: string;
+  birth_text: string;
   contact: string;
   comment: string;
   arrival_date: ISODate | null;
@@ -43,6 +48,9 @@ export function emptyForm(): FormState {
   return {
     first_name: "",
     last_name: "",
+    phone: "",
+    email: "",
+    birth_text: "",
     contact: "",
     comment: "",
     arrival_date: null,
@@ -67,6 +75,9 @@ export function formFromParticipant(p: Omit<Participant, "org_note"> & { org_not
   return {
     first_name: p.first_name,
     last_name: p.last_name ?? "",
+    phone: p.phone ?? "",
+    email: p.email ?? "",
+    birth_text: formatGermanDate(p.birth_date),
     contact: p.contact ?? "",
     comment: p.comment ?? "",
     arrival_date: p.arrival_date,
@@ -94,6 +105,9 @@ export function toPayload(f: FormState, includeOrg = false) {
   return {
     first_name: f.first_name,
     last_name: f.last_name,
+    phone: f.phone.trim() || null,
+    email: f.email.trim() || null,
+    birth_date: parseGermanDate(f.birth_text),
     contact: f.contact || null,
     comment: f.comment || null,
     arrival_date: f.arrival_date,
@@ -172,6 +186,7 @@ export function ParticipantForm({ trip, initial, mode, submitLabel, onSubmit, se
   const validate = (only?: StepId): Record<string, string> => {
     const e: Record<string, string> = {};
     if ((!only || only === "person") && !f.first_name.trim()) e.first_name = "Bitte gib den Vornamen an.";
+    if ((!only || only === "person") && f.birth_text.trim() && !parseGermanDate(f.birth_text)) e.birth_text = "Bitte als TT.MM.JJJJ eingeben";
     if ((!only || only === "person") && !f.last_name.trim()) e.last_name = "Bitte gib den Nachnamen an.";
     if (!only || only === "stay") {
       if (f.arrival_date && f.departure_date && f.departure_date < f.arrival_date) e.departure_date = "Abreise darf nicht vor der Anreise liegen.";
@@ -223,7 +238,18 @@ export function ParticipantForm({ trip, initial, mode, submitLabel, onSubmit, se
             {(p) => <Input {...p} autoComplete="family-name" value={f.last_name} onChange={(e) => set("last_name", e.target.value)} maxLength={60} />}
           </Field>
         </div>
-        <Field label="Kontakt" optional hint="Telefon oder E-Mail – nur für die Organisatoren sichtbar." error={errors.contact}>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field label="Handynummer" optional error={errors.phone}>
+            {(p) => <Input {...p} type="tel" value={f.phone} placeholder="+49 …" onChange={(e) => set("phone", e.target.value)} maxLength={40} />}
+          </Field>
+          <Field label="E-Mail" optional error={errors.email}>
+            {(p) => <Input {...p} type="email" value={f.email} onChange={(e) => set("email", e.target.value)} maxLength={200} />}
+          </Field>
+          <Field label="Geburtstag" optional hint="TT.MM.JJJJ" error={errors.birth_date || errors.birth_text}>
+            {(p) => <Input {...p} inputMode="numeric" value={f.birth_text} placeholder="24.12.1995" onChange={(e) => set("birth_text", e.target.value)} maxLength={10} />}
+          </Field>
+        </div>
+        <Field label="Kontakt / Notiz zur Anmeldung" optional hint="Gilt für die ganze Anmeldung (z. B. Familie)." error={errors.contact}>
           {(p) => <Input {...p} autoComplete="tel" value={f.contact} onChange={(e) => set("contact", e.target.value)} maxLength={200} />}
         </Field>
         <Field label="Nachricht an die Organisatoren" optional hint="Nicht öffentlich sichtbar." error={errors.comment}>

@@ -85,7 +85,7 @@ export function PendingApprovals({ onOpen }: { onOpen: (id: string) => void }) {
         {groups.length === 0 && <p className="text-sm text-muted">Keine offenen Anmeldungen mehr.</p>}
         <ul className="flex flex-col gap-3">
           {groups.map((g) => {
-            const contact = g[0].contact;
+            const contact = g.find((p) => p.phone)?.phone ?? g[0].contact;
             return (
               <li key={g[0].registration_id} className="rounded-lg border border-line p-3" data-testid="pending-group">
                 <div className="flex flex-col gap-1">
@@ -96,12 +96,13 @@ export function PendingApprovals({ onOpen }: { onOpen: (id: string) => void }) {
                         {formatShort(p.arrival_date)} – {formatShort(p.departure_date)}
                       </span>
                       {p.stay_status === "tentative" && <Badge tone="warn">? unbestätigt</Badge>}
+                      {(p.phone || p.email) && <span className="w-full text-xs text-muted">{[p.phone, p.email].filter(Boolean).join(" · ")}</span>}
                     </button>
                   ))}
                 </div>
-                {(contact || g[0].comment) && (
+                {(g[0].contact || g[0].comment) && (
                   <div className="mt-2 text-xs text-muted">
-                    {contact && <div>Kontakt: {contact}</div>}
+                    {g[0].contact && <div>Kontakt: {g[0].contact}</div>}
                     {g[0].comment && <div className="whitespace-pre-wrap">„{g[0].comment}“</div>}
                   </div>
                 )}

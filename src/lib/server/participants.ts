@@ -15,9 +15,17 @@ async function loadTrip(c: PoolClient, tripId: string) {
 }
 
 /** Prüft alle Personen gegen den Reisezeitraum; Feldfehler werden mit Personenindex zurückgegeben. */
-function checkPersons(persons: PersonInput[], trip: { start_date: string; end_date: string }) {
+function checkPersons(
+  persons: PersonInput[],
+  trip: { start_date: string; end_date: string; ski_enabled?: boolean; ski_categories?: { id: string }[] },
+  strict = false
+) {
   persons.forEach((p, i) => {
     const errors = validateAgainstTrip(p, trip);
+    if (strict && trip.ski_enabled && p.ski_need === "yes" && (trip.ski_categories?.length ?? 0) > 0 && !p.ski_category)
+      errors.ski_category = "Bitte die Passkategorie wählen";
+    if (strict && p.ski_category && trip.ski_categories && !trip.ski_categories.some((c) => c.id === p.ski_category))
+      errors.ski_category = "Unbekannte Passkategorie";
     if (Object.keys(errors).length) {
       const fields = Object.fromEntries(Object.entries(errors).map(([k, v]) => [persons.length > 1 ? `persons.${i}.${k}` : k, v]));
       const who = persons.length > 1 ? `${p.first_name}: ` : "";
@@ -34,9 +42,9 @@ function auditView(p: Participant): Record<string, unknown> {
 
 async function insertPerson(c: PoolClient, tripId: string, registrationId: string, position: number, p: PersonInput & { org_note?: string | null }, approval: Approval) {
   const { rows } = await c.query(
-    `INSERT INTO participants (trip_id, registration_id, position, approval, first_name, last_name, org_note, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-    [tripId, registrationId, position, approval, p.first_name, p.last_name ?? "", p.org_note ?? null, p.status ?? "active"]
+    `INSERT INTO participants (trip_id, registration_id, position, approval, first_name, last_name, org_note, status, phone, email, birth_date)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+    [tripId, registrationId, position, approval, p.first_name, p.last_name ?? "", p.org_note ?? null, p.status ?? "active", p.phone ?? null, p.email ?? null, p.birth_date ?? null]
   );
   const id = rows[0].id as string;
   await writeParticipantDetails(c, id, p);
@@ -55,7 +63,7 @@ export async function createRegistration(
   opts: { byOrganizer: boolean }
 ): Promise<{ registrationId: string; ids: string[]; token: string; approval: Approval }> {
   const trip = await loadTrip(c, tripId);
-  checkPersons(input.persons, trip);
+  checkPersons(input.persons, trip, !opts.byOrganizer);
   const approval: Approval = opts.byOrganizer || !trip.require_approval ? "approved" : "pending";
   const token = newSecretToken();
   const { rows } = await c.query(`INSERT INTO registrations (trip_id, edit_token_hash, contact, comment) VALUES ($1,$2,$3,$4) RETURNING id`, [
@@ -91,7 +99,7 @@ export async function updateRegistrationSelf(
   actor: Actor
 ): Promise<void> {
   const trip = await loadTrip(c, reg.trip_id);
-  checkPersons(input.persons, trip);
+  checkPersons(input.persons, trip, true);
   const res = await c.query(
     `UPDATE registrations SET contact=$3, comment=$4, version=version+1, updated_at=now() WHERE id=$1 AND version=$2`,
     [reg.id, expectedVersion, input.contact ?? null, input.comment ?? null]
@@ -113,13 +121,11 @@ export async function updateRegistrationSelf(
     if (p.id) {
       const before = byId.get(p.id)!;
       keep.add(p.id);
-      await c.query(`UPDATE participants SET first_name=$2, last_name=$3, status=$4, position=$5, version=version+1, updated_at=now() WHERE id=$1`, [
-        p.id,
-        p.first_name,
-        p.last_name,
-        p.status ?? before.status,
-        i,
-      ]);
+      await c.query(
+        `UPDATE participants SET first_name=$2, last_name=$3, status=$4, position=$5, phone=$6, email=$7, birth_date=$8,
+                version=version+1, updated_at=now() WHERE id=$1`,
+        [p.id, p.first_name, p.last_name, p.status ?? before.status, i, p.phone ?? null, p.email ?? null, p.birth_date ?? null]
+      );
       await writeParticipantDetails(c, p.id, p);
       const after = (await getParticipant(c, p.id))!;
       const changes = diff(auditView(before), auditView(after));
@@ -157,9 +163,10 @@ export async function updateParticipant(
   const trip = await loadTrip(c, before.trip_id);
   checkPersons([input], trip);
   const { rowCount } = await c.query(
-    `UPDATE participants SET first_name=$3, last_name=$4, org_note=$5, status=$6, version=version+1, updated_at=now()
+    `UPDATE participants SET first_name=$3, last_name=$4, org_note=$5, status=$6, phone=$7, email=$8, birth_date=$9,
+            version=version+1, updated_at=now()
       WHERE id=$1 AND version=$2`,
-    [participantId, expectedVersion, input.first_name, input.last_name ?? "", input.org_note ?? null, input.status ?? before.status]
+    [participantId, expectedVersion, input.first_name, input.last_name ?? "", input.org_note ?? null, input.status ?? before.status, input.phone ?? null, input.email ?? null, input.birth_date ?? null]
   );
   if (!rowCount)
     throw new HttpError(409, "Diese Anmeldung wurde zwischenzeitlich geändert. Bitte prüfe den aktuellen Stand.", { current: before });

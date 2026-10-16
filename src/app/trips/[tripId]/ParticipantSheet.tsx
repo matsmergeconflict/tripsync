@@ -8,6 +8,7 @@ import { api, ApiError } from "@/lib/client/api";
 import { formatLong, formatShort } from "@/lib/dates";
 import { ISSUE_LABELS, ISSUE_SEVERITY } from "@/lib/stats";
 import { DIET_LABELS, type Participant } from "@/lib/types";
+import { formatGermanDate } from "@/lib/person";
 import { approvalMessage, useDecide, whatsappLink } from "./Approvals";
 
 export function personName(p: Pick<Participant, "first_name" | "last_name">) {
@@ -40,6 +41,9 @@ const FIELD_LABELS: Record<string, string> = {
   ski_days: "Skitage",
   ski_category: "Passkategorie",
   ski_discount: "Ermäßigung",
+  phone: "Handy",
+  email: "E-Mail",
+  birth_date: "Geburtstag",
   share_ski_public: "Skitage öffentlich",
   meal_mode: "Essen",
   meal_days: "Essenstage",
@@ -200,7 +204,7 @@ function ApprovalBox({ p, mates, decide }: { p: Participant; mates: Participant[
         )}
       </div>
       {sent && (
-        <a href={whatsappLink(approvalMessage(names, data.trip.name, sent, publicUrl), p.contact)} target="_blank" rel="noreferrer" className="text-sm font-medium text-pine-700 underline">
+        <a href={whatsappLink(approvalMessage(names, data.trip.name, sent, publicUrl), p.phone ?? p.contact)} target="_blank" rel="noreferrer" className="text-sm font-medium text-pine-700 underline">
           Per WhatsApp Bescheid geben →
         </a>
       )}
@@ -260,6 +264,32 @@ export function ParticipantSheet({ id, onClose }: { id: string | null; onClose: 
             </div>
           )}
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+            {p.phone && (
+              <>
+                <dt className="text-muted">Handy</dt>
+                <dd>
+                  <a href={`tel:${p.phone}`} className="text-pine-700 underline">
+                    {p.phone}
+                  </a>
+                </dd>
+              </>
+            )}
+            {p.email && (
+              <>
+                <dt className="text-muted">E-Mail</dt>
+                <dd className="break-all">
+                  <a href={`mailto:${p.email}`} className="text-pine-700 underline">
+                    {p.email}
+                  </a>
+                </dd>
+              </>
+            )}
+            {p.birth_date && (
+              <>
+                <dt className="text-muted">Geburtstag</dt>
+                <dd>{formatGermanDate(p.birth_date)}</dd>
+              </>
+            )}
             <dt className="text-muted">Anreise</dt>
             <dd>
               {p.arrival_date ? formatLong(p.arrival_date) : "–"}

@@ -11,7 +11,7 @@ import type {
 import type { ParticipantOrgInput } from "../validation";
 
 export const TRIP_COLUMNS = `id, name, location, start_date, end_date, public_enabled, invite_enabled, require_approval, ski_enabled,
-  ski_categories, ski_notes, version, created_at, updated_at`;
+  ski_categories, ski_notes, form_texts, version, created_at, updated_at`;
 
 export type TripRow = Trip & { invite_enabled: boolean; invite_code?: string; public_code?: string };
 
@@ -25,6 +25,7 @@ export async function getTrip(db: Db, tripId: string, withCodes = false): Promis
 
 const PARTICIPANT_SELECT = `
   SELECT p.id, p.trip_id, p.registration_id, p.position, p.approval, p.first_name, p.last_name,
+         p.phone, p.email, p.birth_date,
          r.contact, r.comment, p.org_note, p.status, p.version,
          p.created_at, p.updated_at,
          s.arrival_date, to_char(s.arrival_time, 'HH24:MI') AS arrival_time,

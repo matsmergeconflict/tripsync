@@ -39,11 +39,13 @@ function Grid({
   label,
   renderState,
   onPick,
+  edgeWords = { fromShort: "An", toShort: "Ab" },
 }: {
   start: ISODate;
   end: ISODate;
   label: string;
-  renderState: (d: ISODate) => { selected: boolean; edge?: "start" | "end" | "single"; inRange?: boolean; context?: boolean; ariaLabel: string };
+  edgeWords?: { fromShort: string; toShort: string };
+  renderState: (d: ISODate) => { selected: boolean; edge?: "start" | "end" | "single"; inRange?: boolean; context?: boolean; disabled?: boolean; ariaLabel: string };
   onPick: (d: ISODate) => void;
 }) {
   const weeks = weeksFor(start, end);
@@ -67,6 +69,12 @@ function Grid({
                   </div>
                 );
               const st = renderState(d);
+              if (st.disabled)
+                return (
+                  <div key={d} className="flex h-11 items-center justify-center rounded-lg text-sm text-faint line-through decoration-line" aria-label={`${st.ariaLabel}, nicht wählbar`} data-day={d} data-disabled="true">
+                    {dayOfMonth(d)}
+                  </div>
+                );
               return (
                 <button
                   key={d}
@@ -90,7 +98,7 @@ function Grid({
                   <span>{dayOfMonth(d)}</span>
                   {st.edge && (
                     <span className={cx("text-[9px] font-medium leading-none", st.selected ? "text-white/90" : "text-pine-700")}>
-                      {st.edge === "start" ? "An" : st.edge === "end" ? "Ab" : "An/Ab"}
+                      {st.edge === "start" ? edgeWords.fromShort : st.edge === "end" ? edgeWords.toShort : `${edgeWords.fromShort}/${edgeWords.toShort}`}
                     </span>
                   )}
                 </button>
@@ -103,7 +111,7 @@ function Grid({
   );
 }
 
-/** Auswahl von Anreise- und Abreisetag: erster Tipp = Anreise, zweiter = Abreise. */
+/** Auswahl eines Zeitraums: erster Tipp = Beginn, zweiter = Ende. Tage außerhalb von min/max sind gesperrt. */
 export function RangeCalendar({
   start,
   end,
@@ -111,7 +119,18 @@ export function RangeCalendar({
   to,
   onChange,
   label,
-}: BaseProps & { from: ISODate | null; to: ISODate | null; onChange: (from: ISODate | null, to: ISODate | null) => void }) {
+  min,
+  max,
+  words = { from: "Anreise", to: "Abreise", fromShort: "An", toShort: "Ab" },
+}: BaseProps & {
+  from: ISODate | null;
+  to: ISODate | null;
+  onChange: (from: ISODate | null, to: ISODate | null) => void;
+  min?: ISODate | null;
+  max?: ISODate | null;
+  words?: { from: string; to: string; fromShort: string; toShort: string };
+}) {
+  const blocked = (d: ISODate) => (!!min && d < min) || (!!max && d > max);
   const pick = (d: ISODate) => {
     if (!from || (from && to)) return onChange(d, null);
     if (d < from) return onChange(d, from);
@@ -124,6 +143,7 @@ export function RangeCalendar({
         end={end}
         label={label}
         onPick={pick}
+        edgeWords={words}
         renderState={(d) => {
           const isFrom = d === from;
           const isTo = d === to;
@@ -131,13 +151,14 @@ export function RangeCalendar({
           return {
             selected: isFrom || isTo,
             inRange,
+            disabled: blocked(d),
             edge: isFrom && isTo ? "single" : isFrom ? "start" : isTo ? "end" : undefined,
-            ariaLabel: `${formatShort(d)}${isFrom ? ", Anreise" : ""}${isTo ? ", Abreise" : ""}`,
+            ariaLabel: `${formatShort(d)}${isFrom ? `, ${words.from}` : ""}${isTo ? `, ${words.to}` : ""}`,
           };
         }}
       />
       <p className="text-xs text-muted" aria-live="polite">
-        {!from ? "Tippe auf deinen Anreisetag." : !to ? "Jetzt den Abreisetag antippen (gleicher Tag möglich)." : "Zum Ändern einfach neu auswählen."}
+        {!from ? `Tippe auf den Tag der ${words.from}.` : !to ? `Jetzt den Tag der ${words.to} antippen (gleicher Tag möglich).` : "Zum Ändern einfach neu auswählen."}
       </p>
     </div>
   );

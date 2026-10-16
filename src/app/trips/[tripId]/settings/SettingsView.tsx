@@ -7,6 +7,7 @@ import { AuditList } from "../ParticipantSheet";
 import { Badge, Button, Card, CopyLink, Field, Input, Notice, Textarea } from "@/components/ui";
 import { api, ApiError } from "@/lib/client/api";
 import type { SkiCategory } from "@/lib/types";
+import { FORM_TEXT_DEFAULTS, FORM_TEXT_KEYS, FORM_TEXT_LABELS, type FormTextKey } from "@/lib/formTexts";
 
 export function SettingsView() {
   return (
@@ -15,6 +16,7 @@ export function SettingsView() {
       <Sharing />
       <TripBasics />
       <SkiSettings />
+      <FormTextSettings />
       <Organizers />
       <Exports />
       <Card title="Änderungsprotokoll">
@@ -221,6 +223,58 @@ function SkiSettings() {
           </form>
         )}
       </div>
+    </Card>
+  );
+}
+
+/** Alle Überschriften und Hinweise im Anmeldeformular anpassbar; leer = Standardtext. */
+function FormTextSettings() {
+  const { data } = useTrip();
+  const patch = usePatchTrip();
+  const stored = (data.trip.form_texts ?? {}) as Partial<Record<FormTextKey, string>>;
+  const [texts, setTexts] = useState<Record<FormTextKey, string>>(
+    Object.fromEntries(FORM_TEXT_KEYS.map((k) => [k, stored[k] ?? FORM_TEXT_DEFAULTS[k]])) as Record<FormTextKey, string>
+  );
+  const [busy, setBusy] = useState(false);
+  const isTitle = (k: FormTextKey) => k.endsWith("_title") || k.endsWith("_question") || k === "stay_differs";
+  return (
+    <Card title="Texte im Anmeldeformular">
+      <form
+        className="flex flex-col gap-4"
+        data-testid="form-texts"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          // Nur Abweichungen vom Standard speichern
+          const changed = Object.fromEntries(FORM_TEXT_KEYS.filter((k) => texts[k].trim() !== FORM_TEXT_DEFAULTS[k]).map((k) => [k, texts[k].trim()]));
+          await patch({ form_texts: changed });
+          setBusy(false);
+        }}
+      >
+        <p className="text-sm text-muted">
+          Hier passt du die Überschriften und Hinweise an, die Teilnehmer bei der Anmeldung sehen. Ein leeres Feld zeigt wieder den Standardtext. Die Ernährungsweisen (Alles, Vegetarisch,
+          Vegan) und Pflichtfelder bleiben gleich.
+        </p>
+        {FORM_TEXT_KEYS.map((k) => (
+          <Field key={k} label={FORM_TEXT_LABELS[k]}>
+            {(p) =>
+              isTitle(k) ? (
+                <Input {...p} value={texts[k]} placeholder={FORM_TEXT_DEFAULTS[k]} onChange={(e) => setTexts({ ...texts, [k]: e.target.value })} maxLength={300} />
+              ) : (
+                <Textarea {...p} rows={2} value={texts[k]} placeholder={FORM_TEXT_DEFAULTS[k]} onChange={(e) => setTexts({ ...texts, [k]: e.target.value })} maxLength={1500} />
+              )
+            }
+          </Field>
+        ))}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" loading={busy}>
+            Texte speichern
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => setTexts({ ...FORM_TEXT_DEFAULTS })}>
+            Alle auf Standard zurücksetzen
+          </Button>
+        </div>
+      </form>
     </Card>
   );
 }

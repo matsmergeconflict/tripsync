@@ -8,7 +8,7 @@ export interface Actor {
 }
 
 /** Felder, deren Inhalte nicht ins Protokoll geschrieben werden (nur "geändert"). */
-const SENSITIVE = new Set(["allergies", "contact", "comment", "food_wishes"]);
+const SENSITIVE = new Set(["allergies", "contact", "comment", "food_wishes", "phone", "email", "birth_date"]);
 
 export function diff(before: Record<string, unknown> | null, after: Record<string, unknown>): Record<string, { from: unknown; to: unknown }> {
   const changes: Record<string, { from: unknown; to: unknown }> = {};

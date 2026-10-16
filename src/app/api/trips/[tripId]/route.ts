@@ -88,7 +88,7 @@ export const PATCH = handle(async (req: NextRequest, ctx: Ctx) => {
     }
     const { rows } = await c.query(
       `UPDATE trips SET name=$2, location=$3, start_date=$4, end_date=$5, public_enabled=$6, invite_enabled=$7,
-              ski_enabled=$8, ski_categories=$9, ski_notes=$10, require_approval=$12, version=version+1, updated_at=now()
+              ski_enabled=$8, ski_categories=$9, ski_notes=$10, require_approval=$12, form_texts=$13, version=version+1, updated_at=now()
         WHERE id=$1 AND version=$11 RETURNING version`,
       [
         tripId,
@@ -103,6 +103,7 @@ export const PATCH = handle(async (req: NextRequest, ctx: Ctx) => {
         fields.ski_notes === undefined ? before.ski_notes : fields.ski_notes,
         version,
         next.require_approval,
+        JSON.stringify(fields.form_texts ?? before.form_texts ?? {}),
       ]
     );
     if (!rows[0]) throw new HttpError(409, "Die Reise wurde zwischenzeitlich geändert.");

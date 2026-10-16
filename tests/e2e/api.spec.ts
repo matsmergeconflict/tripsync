@@ -1,5 +1,5 @@
 import { expect, request as pwRequest, test, type APIRequestContext } from "@playwright/test";
-import { basePerson, createTrip, getTrip, join, org, type CreatedTrip } from "./helpers";
+import { addPerson, basePerson, createTrip, getTrip, join, org, personal, type CreatedTrip } from "./helpers";
 
 let anon: APIRequestContext;
 test.beforeAll(async ({ baseURL }) => {
@@ -178,10 +178,27 @@ test.describe("Anmeldung ohne Konto und persönlicher Link", () => {
     const badDate = await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, arrival_date: "2027-02-30" } });
     expect(badDate.status()).toBe(400);
     // Grenzfälle: erster und letzter Reisetag, An- und Abreise am selben Tag
-    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, arrival_date: "2027-01-16", departure_date: "2027-01-16", ski_days: [] } })).status()).toBe(201);
-    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, arrival_date: "2027-01-23", departure_date: "2027-01-23", ski_days: [] } })).status()).toBe(201);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, arrival_date: "2027-01-16", departure_date: "2027-01-16", ski_need: "no", ski_days: [] } })).status()).toBe(201);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, arrival_date: "2027-01-23", departure_date: "2027-01-23", ski_need: "no", ski_days: [] } })).status()).toBe(201);
+    // Skipass-Regeln: nicht am ersten Reisetag, nur innerhalb des eigenen Aufenthalts, letzter Tag (Abreise) erlaubt
+    const firstDay = await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, ski_days: ["2027-01-16", "2027-01-17"] } });
+    expect(firstDay.status()).toBe(400);
+    expect((await firstDay.json()).error).toContain("zweiten Reisetag");
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, arrival_date: "2027-01-18", ski_days: ["2027-01-17", "2027-01-18"] } })).status()).toBe(400);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, arrival_date: "2027-01-18", departure_date: "2027-01-20", ski_days: ["2027-01-18", "2027-01-19", "2027-01-20"] } })).status()).toBe(201);
+    // Pflichtfelder der Selbstanmeldung
+    for (const missing of ["phone", "email", "birth_date", "diet"]) {
+      const r = await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, [missing]: null } });
+      expect(r.status(), missing).toBe(400);
+    }
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, ski_need: "unknown" } })).status()).toBe(400);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, diet: "pescetarian" } })).status()).toBe(400);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, phone: "12" } })).status()).toBe(400);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, email: "kein-at" } })).status()).toBe(400);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, birth_date: "2999-01-01" } })).status()).toBe(400);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, ski_category: null } })).status()).toBe(400);
     // fehlende Daten sind erlaubt (werden als offen markiert, nicht erfunden)
-    expect((await anon.post(`/api/join/${t.invite}`, { data: { first_name: "Offen", last_name: "Daten" } })).status()).toBe(201);
+    expect((await anon.post(`/api/join/${t.invite}`, { data: { ...basePerson, first_name: "Offen", arrival_date: null, departure_date: null, ski_need: "no", ski_days: [] } })).status()).toBe(201);
     expect((await anon.post(`/api/join/${t.invite}`, { data: { first_name: "" } })).status()).toBe(400);
   });
 
@@ -269,7 +286,7 @@ test.describe("Bestätigung durch Organisatoren", () => {
 test.describe("Familien-/Gruppenanmeldung", () => {
   test("Mehrere Personen über einen Link, alle zählen, gemeinsamer Bearbeitungslink", async ({ request }) => {
     const t = await createTrip(request, "Familie");
-    const shared = { arrival_date: "2027-01-16", departure_date: "2027-01-20", ski_need: "yes", ski_days: ["2027-01-17", "2027-01-18"], meal_mode: "all_present" };
+    const shared = { ...personal, arrival_date: "2027-01-16", departure_date: "2027-01-20", ski_need: "yes", ski_days: ["2027-01-17", "2027-01-18"], diet: "omnivore" };
     const res = await anon.post(`/api/join/${t.invite}`, {
       data: {
         contact: "+49 170 1234567",
@@ -306,7 +323,7 @@ test.describe("Familien-/Gruppenanmeldung", () => {
         contact: "+49 170 1234567",
         persons: [
           { ...shared, id: anna.id, first_name: "Anna", last_name: "Berger", ski_category: "adult" },
-          { ...shared, id: clara.id, first_name: "Clara", last_name: "Berger", status: "withdrawn", ski_need: "no", ski_days: [] },
+          { id: clara.id, first_name: "Clara", last_name: "Berger", status: "withdrawn", ski_need: "no", ski_days: [] },
           { ...shared, first_name: "David", last_name: "Berger", ski_category: "adult" },
         ],
       },
@@ -367,10 +384,10 @@ test.describe("Öffentliche Übersicht", () => {
 test.describe("Berechnungen und Exporte", () => {
   test("Tagesstatistik: Anwesende, Anreisen, Abreisen, Skipässe (AK 7)", async ({ request }) => {
     const t = await createTrip(request);
-    await join(anon, t, { first_name: "Anna", last_name: "T", arrival_date: "2027-01-16", departure_date: "2027-01-20", ski_need: "yes", ski_days: ["2027-01-17"], ski_category: "adult", meal_mode: "all_present", diet: "omnivore" });
-    await join(anon, t, { first_name: "Max", last_name: "T", arrival_date: "2027-01-17", departure_date: "2027-01-23", ski_need: "no", meal_mode: "none" });
-    await join(anon, t, { first_name: "Lisa", last_name: "T", arrival_date: "2027-01-16", departure_date: "2027-01-17", ski_need: "unknown", meal_mode: "unknown" });
-    await join(anon, t, { first_name: "Tom", last_name: "T", arrival_date: "2027-01-18", departure_date: "2027-01-21", stay_status: "tentative", ski_need: "yes", ski_days: ["2027-01-17", "2027-01-19"], meal_mode: "custom", meal_days: ["2027-01-19"] });
+    await addPerson(anon, t, { first_name: "Anna", last_name: "T", arrival_date: "2027-01-16", departure_date: "2027-01-20", ski_need: "yes", ski_days: ["2027-01-17"], ski_category: "adult", meal_mode: "all_present", diet: "omnivore" });
+    await addPerson(anon, t, { first_name: "Max", last_name: "T", arrival_date: "2027-01-17", departure_date: "2027-01-23", ski_need: "no", meal_mode: "none" });
+    await addPerson(anon, t, { first_name: "Lisa", last_name: "T", arrival_date: "2027-01-16", departure_date: "2027-01-17", ski_need: "unknown", meal_mode: "unknown" });
+    await addPerson(anon, t, { first_name: "Tom", last_name: "T", arrival_date: "2027-01-18", departure_date: "2027-01-21", stay_status: "tentative", ski_need: "yes", ski_days: ["2027-01-19", "2027-01-20"], meal_mode: "custom", meal_days: ["2027-01-19"] });
     const csv = await (await request.get(`/api/trips/${t.tripId}/export?type=days`, { headers: org(t) })).text();
     const rows = Object.fromEntries(
       csv
@@ -382,10 +399,10 @@ test.describe("Berechnungen und Exporte", () => {
     );
     // Spalten: Anwesend, unbestätigt, An, Ab, Übernachtungen, Ski, Essen, Essen unklar
     expect(rows["2027-01-16"]).toEqual([2, 0, 2, 0, 2, 0, 1, 1]);
-    expect(rows["2027-01-17"]).toEqual([3, 0, 1, 1, 2, 2, 1, 1]);
+    expect(rows["2027-01-17"]).toEqual([3, 0, 1, 1, 2, 1, 1, 1]);
     expect(rows["2027-01-18"]).toEqual([3, 1, 1, 0, 3, 0, 1, 0]);
     expect(rows["2027-01-19"]).toEqual([3, 1, 0, 0, 3, 1, 2, 0]);
-    expect(rows["2027-01-20"]).toEqual([3, 1, 0, 1, 2, 0, 1, 0]);
+    expect(rows["2027-01-20"]).toEqual([3, 1, 0, 1, 2, 1, 1, 0]);
     expect(rows["2027-01-21"]).toEqual([2, 1, 0, 1, 1, 0, 0, 0]);
     expect(rows["2027-01-23"]).toEqual([1, 0, 0, 1, 0, 0, 0, 0]);
   });
@@ -406,14 +423,14 @@ test.describe("Berechnungen und Exporte", () => {
 
   test("CSV entschärft Formel-Injektion", async ({ request }) => {
     const t = await createTrip(request);
-    await join(anon, t, { first_name: "=HYPERLINK(\"x\")", last_name: "Test" });
+    await join(anon, t, { ...basePerson, first_name: "=HYPERLINK(\"x\")", last_name: "Test" });
     const csv = await (await request.get(`/api/trips/${t.tripId}/export?type=participants`, { headers: org(t) })).text();
     expect(csv).toContain("'=HYPERLINK");
   });
 
   test("Einkaufsliste: Portionen, Skalierung, Einheiten und bestätigte Zusammenführung", async ({ request }) => {
     const t = await createTrip(request);
-    for (const n of ["A", "B", "C", "D", "E", "F"]) await join(anon, t, { first_name: n, last_name: "T", arrival_date: "2027-01-16", departure_date: "2027-01-18", meal_mode: "all_present", diet: "omnivore" });
+    for (const n of ["A", "B", "C", "D", "E", "F"]) await join(anon, t, { ...basePerson, first_name: n, last_name: "T", arrival_date: "2027-01-16", departure_date: "2027-01-18", ski_need: "no", ski_days: [], diet: "omnivore" });
     const h = { headers: org(t) };
     const r1 = await (await request.post(`/api/trips/${t.tripId}/recipes`, { ...h, data: { name: "A", base_servings: 4, ingredients: [{ name: "Kartoffeln", quantity: 2, unit: "kg" }, { name: "Milch", quantity: 500, unit: "ml" }] } })).json();
     const r2 = await (await request.post(`/api/trips/${t.tripId}/recipes`, { ...h, data: { name: "B", base_servings: 3, ingredients: [{ name: "festkochende Kartoffeln", quantity: 750, unit: "g" }, { name: "Milch", quantity: 1, unit: "l" }, { name: "Eier", quantity: 3, unit: "" }] } })).json();

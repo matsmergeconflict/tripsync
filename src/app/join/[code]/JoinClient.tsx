@@ -102,7 +102,7 @@ export function JoinClient() {
           setBusy(true);
           setError(null);
           try {
-            const res = await api<Done>(`/api/join/${code}`, { body: groupToPayload(g) });
+            const res = await api<Done>(`/api/join/${code}`, { body: groupToPayload(g, trip) });
             setDone(res);
             window.scrollTo({ top: 0 });
           } catch (e) {

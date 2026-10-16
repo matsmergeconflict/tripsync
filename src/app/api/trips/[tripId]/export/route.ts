@@ -7,6 +7,7 @@ import { computeDayStats, computeSkiSummary, findIssues, ISSUE_LABELS, NO_CATEGO
 import { buildShoppingList, mealServings } from "@/lib/plan";
 import { DIET_LABELS, MEAL_TYPE_LABELS, type SkiCategory } from "@/lib/types";
 import { formatQuantity } from "@/lib/units";
+import { formatGermanDate } from "@/lib/person";
 
 const STAY = { confirmed: "bestätigt", tentative: "unklar" } as const;
 const SKI = { yes: "ja", no: "nein", unknown: "unklar" } as const;
@@ -38,12 +39,15 @@ export const GET = handle(async (req: NextRequest, ctx: RouteContext<"/api/trips
   switch (type) {
     case "participants": {
       csv = toCsv(
-        ["Vorname", "Nachname", "Status", "Angemeldet zusammen mit", "Anreise", "Ankunftszeit", "Abreise", "Abfahrtszeit", "Angaben", "Skipass", "Skitage", "Passkategorie", "Essen", "Ernährung", "Kontakt", "Offene Punkte"],
+        ["Vorname", "Nachname", "Status", "Angemeldet zusammen mit", "Handy", "E-Mail", "Geburtstag", "Anreise", "Ankunftszeit", "Abreise", "Abfahrtszeit", "Angaben", "Skipass", "Skitage", "Passkategorie", "Essen", "Ernährung", "Kontakt", "Offene Punkte"],
         participants.map((p) => [
           p.first_name,
           p.last_name,
           statusLabel(p),
           (groupNames.get(p.registration_id) ?? []).filter((n) => n !== `${p.first_name} ${p.last_name}`.trim()),
+          p.phone,
+          p.email,
+          formatGermanDate(p.birth_date),
           p.arrival_date,
           p.arrival_time,
           p.departure_date,
@@ -78,8 +82,21 @@ export const GET = handle(async (req: NextRequest, ctx: RouteContext<"/api/trips
         sum.perDay.map((d) => [d.day, d.total, d.tentative, ...cats.map((c) => d.byCategory[c] ?? 0)])
       );
       csv += toCsv(
-        ["Vorname", "Nachname", "Skipass", "Kategorie", "Ermäßigung", "Skitage", "Anzahl Tage"],
-        active.filter((p) => p.ski_need !== "no").map((p) => [p.first_name, p.last_name, SKI[p.ski_need], catName(p.ski_category), p.ski_discount, p.ski_days, p.ski_days.length])
+        ["Vorname", "Nachname", "Geburtsjahr", "Geburtstag", "Skipass", "Kategorie", "Erster Skitag", "Letzter Skitag", "Anzahl Tage", "Ermäßigung"],
+        active
+          .filter((p) => p.ski_need !== "no")
+          .map((p) => [
+            p.first_name,
+            p.last_name,
+            p.birth_date ? p.birth_date.slice(0, 4) : "",
+            formatGermanDate(p.birth_date),
+            SKI[p.ski_need],
+            catName(p.ski_category),
+            p.ski_days[0] ?? "",
+            p.ski_days[p.ski_days.length - 1] ?? "",
+            p.ski_days.length,
+            p.ski_discount,
+          ])
       ).replace("﻿", "\r\n");
       name = "skipaesse";
       break;

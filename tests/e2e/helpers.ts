@@ -37,7 +37,11 @@ export async function createTrip(request: APIRequestContext, name = "Testreise",
   };
 }
 
+/** Pflichtangaben pro Person bei der Selbstanmeldung */
+export const personal = { phone: "+49 170 1234567", email: "anna@example.com", birth_date: "1995-12-24" };
+
 export const basePerson = {
+  ...personal,
   first_name: "Anna",
   last_name: "Berger",
   contact: "anna@example.com",
@@ -63,4 +67,11 @@ export async function join(request: APIRequestContext, t: CreatedTrip, data: Rec
 
 export async function getTrip(request: APIRequestContext, t: CreatedTrip) {
   return (await request.get(`/api/trips/${t.tripId}`, { headers: org(t) })).json();
+}
+
+/** Organisator legt eine Person direkt an (ohne Pflichtfelder der Selbstanmeldung, sofort bestätigt). */
+export async function addPerson(request: APIRequestContext, t: CreatedTrip, data: Record<string, unknown>) {
+  const res = await request.post(`/api/trips/${t.tripId}/participants`, { headers: org(t), data });
+  if (res.status() !== 201) throw new Error(`addPerson ${res.status()} ${await res.text()}`);
+  return (await res.json()) as { id: string; edit_url: string };
 }

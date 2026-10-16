@@ -95,3 +95,13 @@ Ein späterer Umstieg auf Supabase Auth/Realtime ist möglich, aber nicht nötig
 - Skipass-Kosten sind eine einfache Schätzung (Tagespreis × Personentage), ohne Mehrtagestarife.
 - Mehrere Reisen: Datenmodell und URLs unterstützen beliebig viele Reisen; es gibt aber (gewollt, da ohne Konto)
   keine Liste „meine Reisen“ – jede Reise erreicht man über ihren Organisator-Link.
+
+## 9. Anmeldeformular (Stand Oktober 2026, Wünsche des Auftraggebers)
+
+- Pro Person Pflicht: Vorname, Nachname, Handynummer (vorbelegt mit +49), E-Mail, Geburtstag (Eingabe TT.MM.JJJJ).
+- Entfallen: Kontakt/Nachricht pro Anmeldung, Uhrzeiten, „Wie sicher sind die Angaben?“, Essensteilnahme (alle Anwesenden essen mit), Essenswünsche, Ermäßigung.
+- Skipass: nur Ja/Nein, immer als Zeitraum (erster–letzter Skitag). Frühestens 2. Reisetag und Anreisetag der Person, spätestens Abreisetag; der Server prüft das.
+  Bei abweichendem Aufenthalt wird der gemeinsame Skizeitraum auf den Aufenthalt der Person zugeschnitten. Geburtsjahr wird beim Skipass angezeigt und exportiert.
+- Ernährung: Alles / Vegetarisch / Vegan (Pflicht), Allergien optional. Vegan-Hinweis anpassbar.
+- Alle Überschriften und Hinweise im Formular sind pro Reise unter Einstellungen anpassbar (`trips.form_texts`, leer = Standard).
+- Organisatoren können Personen weiterhin ohne diese Pflichtfelder anlegen.

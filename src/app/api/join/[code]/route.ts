@@ -3,7 +3,7 @@ import { pool, tx } from "@/lib/server/db";
 import { baseUrl, clientIp, handle, json, rateLimit, readJson } from "@/lib/server/http";
 import { createRegistration } from "@/lib/server/participants";
 import { publicTripView, tripByInvite } from "@/lib/server/public";
-import { registrationSchema } from "@/lib/validation";
+import { selfRegistrationSchema } from "@/lib/validation";
 
 type Ctx = RouteContext<"/api/join/[code]">;
 
@@ -22,7 +22,7 @@ export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const { code } = await ctx.params;
   rateLimit(`join:${clientIp(req)}`, 20, 60_000);
   const trip = await tripByInvite(pool(), code);
-  const input = await readJson(req, registrationSchema);
+  const input = await readJson(req, selfRegistrationSchema);
   const first = input.persons[0];
   const label = `${first.first_name} ${first.last_name}`.trim() + (input.persons.length > 1 ? ` (+${input.persons.length - 1})` : "");
   const r = await tx((c) => createRegistration(c, trip.id, input, { type: "participant", id: null, label }, { byOrganizer: false }));

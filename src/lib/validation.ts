@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { isISODate } from "./dates";
+import { FORM_TEXT_KEYS } from "./formTexts";
+import { isPlausibleBirthDate, isValidEmail, isValidPhone, normalizePhone } from "./person";
 
 const optText = (max: number) =>
   z
@@ -40,6 +42,27 @@ export const personSchema = z.object({
   id: z.string().uuid().optional(),
   first_name: z.string().trim().min(1, "Vorname fehlt").max(60),
   last_name: z.string().trim().min(1, "Nachname fehlt").max(60),
+  phone: z
+    .string()
+    .trim()
+    .max(40)
+    .nullable()
+    .optional()
+    .transform((v) => (v && v.replace(/[^\d]/g, "").length > 2 ? normalizePhone(v) : null))
+    .refine((v) => v === null || isValidPhone(v), "Ungültige Handynummer (z. B. +49 170 1234567)"),
+  email: z
+    .string()
+    .trim()
+    .max(200)
+    .nullable()
+    .optional()
+    .transform((v) => (v ? v.toLowerCase() : null))
+    .refine((v) => v === null || isValidEmail(v), "Ungültige E-Mail-Adresse"),
+  birth_date: isoDate
+    .refine((d) => isPlausibleBirthDate(d), "Ungültiger Geburtstag")
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
   arrival_date: optDate,
   arrival_time: optTime,
   departure_date: optDate,
@@ -83,6 +106,49 @@ export const registrationSchema = z.preprocess(
 );
 export type RegistrationInput = z.infer<typeof registrationSchema>;
 
+/**
+ * Selbstanmeldung über den Einladungslink: strengere Pflichtfelder.
+ * Essen: alle Anwesenden werden eingeplant; nur Ernährungsweise (Alles/Vegetarisch/Vegan) ist anzugeben.
+ */
+export const selfPersonSchema = personSchema
+  .superRefine((p, ctx) => {
+    // Pflichtangaben gelten nur für Personen, die teilnehmen (Absagen bleibt immer möglich)
+    if (p.status === "withdrawn") return;
+    if (!p.phone) ctx.addIssue({ code: "custom", path: ["phone"], message: "Handynummer fehlt" });
+    if (!p.email) ctx.addIssue({ code: "custom", path: ["email"], message: "E-Mail fehlt" });
+    if (!p.birth_date) ctx.addIssue({ code: "custom", path: ["birth_date"], message: "Geburtstag fehlt" });
+    if (p.ski_need === "unknown") ctx.addIssue({ code: "custom", path: ["ski_need"], message: "Bitte angeben, ob ein Skipass gebraucht wird" });
+    if (p.ski_need === "yes" && !p.ski_days.length) ctx.addIssue({ code: "custom", path: ["ski_days"], message: "Bitte ersten und letzten Skitag wählen" });
+    if (!p.diet || !["omnivore", "vegetarian", "vegan"].includes(p.diet))
+      ctx.addIssue({ code: "custom", path: ["diet"], message: "Bitte die Ernährungsweise wählen (Alles, Vegetarisch oder Vegan)" });
+  })
+  .transform((p) => ({
+    ...p,
+    // nicht mehr abgefragt: Uhrzeiten, Sicherheit der Angaben, Essensteilnahme (alle Anwesenden essen mit)
+    arrival_time: null,
+    departure_time: null,
+    stay_status: "confirmed" as const,
+    meal_mode: "all_present" as const,
+    meal_days: [] as string[],
+    ski_discount: null,
+    food_wishes: null,
+  }));
+export type SelfPersonInput = z.infer<typeof selfPersonSchema>;
+
+export const selfRegistrationSchema = z.preprocess(
+  (raw) => {
+    if (raw && typeof raw === "object" && !Array.isArray(raw) && !("persons" in raw)) {
+      const { contact, comment, ...person } = raw as Record<string, unknown>;
+      return { contact, comment, persons: [person] };
+    }
+    return raw;
+  },
+  z.object({
+    ...groupFields,
+    persons: z.array(selfPersonSchema).min(1, "Mindestens eine Person").max(12, "Maximal 12 Personen pro Anmeldung"),
+  })
+);
+
 /** Kompatibler Alias: einzelne Person inkl. Gruppenfeldern. */
 export const participantSelfSchema = personSchema.extend(groupFields);
 export type ParticipantSelfInput = z.infer<typeof participantSelfSchema>;
@@ -105,6 +171,9 @@ export function validateAgainstTrip(
   if (p.arrival_date && p.departure_date && p.departure_date < p.arrival_date)
     errors.departure_date = "Abreise darf nicht vor der Anreise liegen";
   if (p.ski_days.some((d) => !inTrip(d))) errors.ski_days = "Skitage müssen im Reisezeitraum liegen";
+  else if (p.ski_days.includes(trip.start_date)) errors.ski_days = "Skipässe gibt es frühestens ab dem zweiten Reisetag";
+  else if (p.arrival_date && p.departure_date && p.ski_days.some((d) => d < p.arrival_date! || d > p.departure_date!))
+    errors.ski_days = "Skitage müssen zwischen Anreise und Abreise liegen";
   if (p.meal_days.some((d) => !inTrip(d))) errors.meal_days = "Essenstage müssen im Reisezeitraum liegen";
   return errors;
 }
@@ -138,6 +207,7 @@ export const tripUpdateSchema = z.object({
   ski_enabled: z.boolean().optional(),
   ski_categories: z.array(skiCategorySchema).max(20).optional(),
   ski_notes: patchText(2000),
+  form_texts: z.partialRecord(z.enum(FORM_TEXT_KEYS as [string, ...string[]]), z.string().max(1500)).optional(),
 });
 
 export const mealSchema = z.object({

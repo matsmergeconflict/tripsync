@@ -6,7 +6,7 @@ import { stripOrgFields, updateRegistrationSelf } from "@/lib/server/participant
 import { publicTripView, PUBLIC_TRIP_COLUMNS } from "@/lib/server/public";
 import { getRegistrationByTokenHash, listRegistrationParticipants } from "@/lib/server/repo";
 import { hashToken, looksLikeToken } from "@/lib/server/tokens";
-import { registrationSchema } from "@/lib/validation";
+import { selfRegistrationSchema } from "@/lib/validation";
 
 /**
  * Persönlicher Schreibzugriff: ausschließlich über den Bearbeitungstoken im Header
@@ -42,7 +42,7 @@ export const GET = handle(async (req: NextRequest) => {
 
 const patchSchema = z.preprocess(
   (raw) => raw,
-  z.intersection(z.object({ version: z.number().int() }), registrationSchema)
+  z.intersection(z.object({ version: z.number().int() }), selfRegistrationSchema)
 );
 
 export const PATCH = handle(async (req: NextRequest) => {

@@ -4,7 +4,7 @@ import { HttpError } from "./http";
 import { looksLikeCode } from "./tokens";
 
 /** Öffentliche Reisedaten, die Teilnehmer bei der Anmeldung sehen dürfen. */
-export const PUBLIC_TRIP_COLUMNS = `id, name, location, start_date, end_date, ski_enabled, ski_categories, ski_notes, public_enabled, public_code`;
+export const PUBLIC_TRIP_COLUMNS = `id, name, location, start_date, end_date, ski_enabled, ski_categories, ski_notes, form_texts, public_enabled, public_code`;
 
 export async function tripByInvite(db: Db, code: string) {
   if (!looksLikeCode(code)) throw new HttpError(404, "Einladungslink ungültig");
@@ -33,5 +33,6 @@ export function publicTripView(t: Record<string, unknown>) {
     ski_enabled: t.ski_enabled,
     ski_categories: t.ski_categories,
     ski_notes: t.ski_notes,
+    form_texts: t.form_texts ?? {},
   };
 }

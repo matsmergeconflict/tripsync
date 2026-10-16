@@ -8,6 +8,9 @@ export type MealMode = "all_present" | "custom" | "none" | "unknown";
 export type Diet = "omnivore" | "vegetarian" | "vegan" | "pescetarian" | "other";
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
+/** Im Anmeldeformular angebotene Ernährungsweisen */
+export const SELF_DIETS: Diet[] = ["omnivore", "vegetarian", "vegan"];
+
 export const DIET_LABELS: Record<Diet, string> = {
   omnivore: "Alles",
   vegetarian: "Vegetarisch",
@@ -43,6 +46,7 @@ export interface Trip {
   ski_enabled: boolean;
   ski_categories: SkiCategory[];
   ski_notes: string | null;
+  form_texts: Record<string, string>;
   version: number;
   created_at: string;
   updated_at: string;
@@ -57,6 +61,9 @@ export interface Participant {
   approval: Approval;
   first_name: string;
   last_name: string;
+  phone: string | null;
+  email: string | null;
+  birth_date: ISODate | null;
   contact: string | null; // gilt für die ganze Anmeldung (Gruppe)
   comment: string | null; // privat: an Organisatoren, gilt für die ganze Anmeldung
   org_note: string | null; // intern: nur Organisatoren
