@@ -20,7 +20,8 @@ export const GET = handle(async (_req: NextRequest, ctx: Ctx) => {
  */
 export const POST = handle(async (req: NextRequest, ctx: Ctx) => {
   const { code } = await ctx.params;
-  rateLimit(`join:${clientIp(req)}`, 20, 60_000);
+  // großzügig: oft melden sich viele Leute über dasselbe WLAN (gleiche IP) an
+  rateLimit(`join:${clientIp(req)}`, 120, 60_000);
   const trip = await tripByInvite(pool(), code);
   const input = await readJson(req, selfRegistrationSchema);
   const first = input.persons[0];
